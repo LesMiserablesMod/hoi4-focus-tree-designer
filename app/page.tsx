@@ -45,6 +45,7 @@ type FocusNode = {
   id: string;
   name: string;
   description: string;
+  days: number;
   absX: number;
   absY: number;
   prerequisiteGroups: string[][];
@@ -82,6 +83,7 @@ const initialProject: ProjectState = {
       id: "TAG_national_reconstruction",
       name: "国家重建",
       description: "重新整合国家机构，为未来的发展奠定稳定基础。",
+      days: 70,
       absX: 0,
       absY: 0,
       prerequisiteGroups: [],
@@ -94,6 +96,7 @@ const initialProject: ProjectState = {
       id: "TAG_industrial_recovery",
       name: "工业复兴",
       description: "重建国家工业基础，解锁新的生产能力。",
+      days: 70,
       absX: -2,
       absY: 2,
       prerequisiteGroups: [["root-rebuild"]],
@@ -106,6 +109,7 @@ const initialProject: ProjectState = {
       id: "TAG_army_reform",
       name: "军备整顿",
       description: "整顿军备体系，为陆军现代化做好准备。",
+      days: 70,
       absX: 2,
       absY: 2,
       prerequisiteGroups: [["root-rebuild"]],
@@ -118,6 +122,7 @@ const initialProject: ProjectState = {
       id: "TAG_research_cooperation",
       name: "科研合作",
       description: "联合大学与工业实验室，加快技术成果转化。",
+      days: 70,
       absX: -2,
       absY: 4,
       prerequisiteGroups: [["industrial-recovery"]],
@@ -130,6 +135,7 @@ const initialProject: ProjectState = {
       id: "TAG_homeland_defense",
       name: "国土防线",
       description: "加固边境与战略要地，建立纵深防御体系。",
+      days: 70,
       absX: 2,
       absY: 4,
       prerequisiteGroups: [["army-reform"]],
@@ -213,6 +219,7 @@ function normalizeProject(value: unknown): ProjectState | null {
       id: node.id,
       name: typeof node.name === "string" ? node.name : node.id,
       description: typeof node.description === "string" ? node.description : "",
+      days: Number.isFinite(node.days) ? Math.max(1, Math.round(Number(node.days))) : 70,
       absX: Number.isFinite(node.absX) ? Number(node.absX) : 0,
       absY: Number.isFinite(node.absY) ? Number(node.absY) : 0,
       prerequisiteGroups: groups,
@@ -268,6 +275,10 @@ function safeToken(value: string, fallback: string) {
   return cleaned || fallback;
 }
 
+function focusCostFromDays(days: number) {
+  return String(Number((Math.max(1, days) / 7).toFixed(6)));
+}
+
 function generateFocusScript(project: ProjectState) {
   const normalizedNodes = completeMutualGroups(project.nodes);
   const nodeByUid = new Map(normalizedNodes.map((node) => [node.uid, node]));
@@ -301,7 +312,7 @@ function generateFocusScript(project: ProjectState) {
 \t\ticon = GFX_goal_generic_construct_civ_factory
 \t\tx = ${x}
 \t\ty = ${y}${relativeLine}
-\t\tcost = 10${relationSection}
+\t\tcost = ${focusCostFromDays(node.days)}${relationSection}
 
 \t\tcompletion_reward = {
 \t\t\tadd_political_power = 0
@@ -413,6 +424,7 @@ function parseFocusScript(text: string, localisation: Map<string, string>) {
       .map(focusIdsInBlock)
       .filter((group) => group.length);
     const mutuallyExclusiveIds = extractBlocks(block, "mutually_exclusive").flatMap(focusIdsInBlock);
+    const parsedCost = Number.parseFloat(scalar(block, "cost") || "10");
     return {
       id,
       x: Number.parseInt(scalar(block, "x") || "0", 10),
@@ -420,6 +432,7 @@ function parseFocusScript(text: string, localisation: Map<string, string>) {
       relativeId: scalar(block, "relative_position_id") || null,
       prerequisiteIdGroups,
       mutuallyExclusiveIds,
+      days: Number.isFinite(parsedCost) && parsedCost > 0 ? Math.max(1, Math.round(parsedCost * 7)) : 70,
       artwork: index % 5,
     };
   });
@@ -449,6 +462,7 @@ function parseFocusScript(text: string, localisation: Map<string, string>) {
       id: node.id,
       name: localisation.get(node.id) ?? node.id,
       description: localisation.get(`${node.id}_desc`) ?? "",
+      days: node.days,
       absX: position.x,
       absY: position.y,
       prerequisiteGroups: node.prerequisiteIdGroups
@@ -480,6 +494,7 @@ function validationFor(project: ProjectState) {
     if (!id) errors.push("存在未填写 ID 的国策");
     else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) errors.push(`${id}：ID 应以字母或下划线开头，且只含字母、数字、下划线`);
     if (!node.name.trim()) warnings.push(`${id || "未命名国策"}：尚未填写名称`);
+    if (!Number.isInteger(node.days) || node.days < 1) errors.push(`${id || "未命名国策"}：完成天数必须是正整数`);
   });
   ids.forEach((count, id) => {
     if (id && count > 1) errors.push(`${id}：ID 重复`);
@@ -933,6 +948,7 @@ export default function Home() {
       id: `${safeToken(project.countryTag.toUpperCase(), "TAG")}_new_focus_${index}`,
       name: "新国策",
       description: "在这里填写国策描述。",
+      days: 70,
       absX: position.x,
       absY: position.y,
       prerequisiteGroups: anchor ? [[anchor.uid]] : [],
@@ -1299,6 +1315,10 @@ export default function Home() {
               <label>国策 ID<input value={selected.id} spellCheck={false} onChange={(event) => patchNode(selected.uid, { id: event.target.value })} /></label>
               <label>本地化名称<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value })} /></label>
               <label>本地化描述<textarea value={selected.description} rows={6} onChange={(event) => patchNode(selected.uid, { description: event.target.value })} /></label>
+              <label>完成天数<input type="number" min="1" step="1" value={selected.days} onChange={(event) => {
+                const days = event.currentTarget.valueAsNumber;
+                if (Number.isFinite(days)) patchNode(selected.uid, { days: Math.max(1, Math.round(days)) });
+              }} /></label>
 
               <div className="ornament-rule"><span /></div>
 
@@ -1410,7 +1430,7 @@ export default function Home() {
                     >
                       <span className="card-art" aria-hidden="true" />
                       <span className="card-copy"><strong>{node.name || "未命名国策"}</strong><small>{node.id || "missing_id"}</small></span>
-                      <span className="card-meta"><span><Focus size={12} />x {rx} · y {ry}</span><span>70 日</span></span>
+                      <span className="card-meta"><span><Focus size={12} />x {rx} · y {ry}</span><span>{node.days} 日</span></span>
                     </button>
                   );
                 })}
