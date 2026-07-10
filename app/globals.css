@@ -173,6 +173,42 @@ label.file-button:focus-within {
   min-width: 0;
 }
 
+.ui-language-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px 3px 2px 7px;
+  color: rgba(244, 233, 211, 0.62);
+  background: rgba(4, 18, 29, 0.42);
+  border: 1px solid rgba(212, 190, 145, 0.3);
+  border-radius: 4px;
+}
+
+.ui-language-switch > svg {
+  margin-right: 2px;
+}
+
+.ui-language-switch button {
+  height: 24px;
+  min-width: 29px;
+  padding: 0 6px;
+  color: rgba(244, 233, 211, 0.62);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+}
+
+.ui-language-switch button.active {
+  color: #fff8e9;
+  background: #194566;
+  box-shadow: inset 0 0 0 1px rgba(226, 200, 147, 0.26);
+}
+
 .save-indicator {
   gap: 6px;
   margin-right: 4px;
@@ -342,7 +378,8 @@ button:disabled {
 .inspector-form input,
 .inspector-form textarea,
 .inspector-form select,
-.project-card input {
+.project-card input,
+.project-card select {
   width: 100%;
   color: var(--ink);
   background: rgba(255, 252, 244, 0.68);
@@ -355,7 +392,8 @@ button:disabled {
 
 .inspector-form input,
 .inspector-form select,
-.project-card input {
+.project-card input,
+.project-card select {
   height: 37px;
   padding: 0 10px;
 }
@@ -828,7 +866,7 @@ button:disabled {
   background-color: #d9c9aa;
   background-image:
     linear-gradient(rgba(242, 232, 210, 0.08), rgba(242, 232, 210, 0.2)),
-    url("/hoi4-focus-tree-designer/focus-art-strip.png");
+    url("/focus-art-strip.png");
   background-position: 0 0, 0% center;
   background-repeat: no-repeat;
   background-size: 100% 100%, 500% 100%;
@@ -1077,9 +1115,21 @@ button:disabled {
   gap: 9px;
 }
 
-.project-card input {
+.project-card input,
+.project-card select {
   height: 32px;
   font-size: 10px;
+}
+
+.project-card select {
+  padding: 0 8px;
+}
+
+.language-note {
+  margin: 1px 0 0;
+  color: #8a7862;
+  font-size: 8px;
+  line-height: 1.55;
 }
 
 .export-card {
