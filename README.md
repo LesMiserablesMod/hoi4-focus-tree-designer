@@ -1,13 +1,10 @@
 # HOI4 Focus Tree Designer
 
+![](public\og.png)
+
 A lightweight, browser-based focus tree editor for *Hearts of Iron IV* modders. Build and rearrange focus trees on a draggable canvas, model prerequisite and mutually exclusive relationships, then export game-ready focus scripts and localisation files.
 
 The editor runs entirely in the browser. Your draft stays on your device unless you export or import files yourself.
-
-## Try it online
-
-- [Open the HOI4 Focus Tree Designer](https://hoi4-focus-tree-designer.snug-loon-2361.chatgpt.site/)
-- [GitHub Pages mirror](https://lesmiserablesmod.github.io/hoi4-focus-tree-designer/)
 
 ## Features
 
@@ -63,8 +60,6 @@ The static site is generated in `out/`. Pushes to `main` are deployed to GitHub 
 ## 中文说明
 
 HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁雄心 IV》Mod 辅助工具。你可以在可拖拽画布上规划国策树，设置相对坐标、AND/OR 前置条件与完整互斥组，并导入或导出游戏使用的 TXT/YML 文件。
-
-在线使用：[HOI4 国策树设计器](https://hoi4-focus-tree-designer.snug-loon-2361.chatgpt.site/)
 
 主要功能包括：
 
