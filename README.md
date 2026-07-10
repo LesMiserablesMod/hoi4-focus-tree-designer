@@ -1,6 +1,6 @@
 # HOI4 Focus Tree Designer
 
-![](public\og.png)
+![](./public/og.png)
 
 A lightweight, browser-based focus tree editor for *Hearts of Iron IV* modders. Build and rearrange focus trees on a draggable canvas, model prerequisite and mutually exclusive relationships, then export game-ready focus scripts and localisation files.
 
