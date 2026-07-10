@@ -768,6 +768,20 @@ export default function Home() {
   const validation = useMemo(() => validationFor(project), [project]);
   const focusScript = useMemo(() => generateFocusScript(project), [project]);
   const localisation = useMemo(() => generateLocalisation(project), [project]);
+  const minimapBounds = useMemo(() => {
+    if (!project.nodes.length) return { x: 0, y: 0, width: WORLD_W, height: WORLD_H };
+    const padding = 72;
+    const left = Math.min(...project.nodes.map((node) => worldX(node.absX)));
+    const right = Math.max(...project.nodes.map((node) => worldX(node.absX) + NODE_W));
+    const top = Math.min(...project.nodes.map((node) => worldY(node.absY)));
+    const bottom = Math.max(...project.nodes.map((node) => worldY(node.absY) + NODE_H));
+    return {
+      x: left - padding,
+      y: top - padding,
+      width: right - left + padding * 2,
+      height: bottom - top + padding * 2,
+    };
+  }, [project.nodes]);
 
   useEffect(() => {
     projectRef.current = project;
@@ -1030,7 +1044,7 @@ export default function Home() {
 
   function handleCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
-    if ((event.target as HTMLElement).closest(".focus-card")) return;
+    if ((event.target as HTMLElement).closest(".focus-card, .zoom-controls")) return;
     setSelectedUid("");
     event.currentTarget.setPointerCapture(event.pointerId);
     panRef.current = {
@@ -1403,7 +1417,7 @@ export default function Home() {
               </div>
 
               <div className="canvas-help"><MousePointer2 size={14} />拖动节点 · 方向键微调 · 滚轮缩放</div>
-              <div className="zoom-controls" aria-label="缩放控制">
+              <div className="zoom-controls" aria-label="缩放控制" onPointerDown={(event) => event.stopPropagation()}>
                 <button onClick={() => zoomBy(0.88)} aria-label="缩小"><ZoomOut size={17} /></button>
                 <span>{Math.round(view.zoom * 100)}%</span>
                 <button onClick={() => zoomBy(1.14)} aria-label="放大"><ZoomIn size={17} /></button>
@@ -1428,7 +1442,7 @@ export default function Home() {
           <section className="utility-card panel-paper minimap-card">
             <div className="utility-heading"><div><span className="eyebrow">NAVIGATOR</span><h2>导航器</h2></div><LocateFixed size={18} /></div>
             <button className="minimap" onClick={fitView} aria-label="点击适应全部国策">
-              <svg viewBox={`0 0 ${WORLD_W} ${WORLD_H}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+              <svg viewBox={`${minimapBounds.x} ${minimapBounds.y} ${minimapBounds.width} ${minimapBounds.height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                 {prerequisiteEdges.map(({ parentUid, childUid, isOr }) => {
                   const parent = nodeByUid.get(parentUid);
                   const child = nodeByUid.get(childUid);
@@ -1443,7 +1457,7 @@ export default function Home() {
                 })}
                 {project.nodes.map((node) => <rect key={node.uid} className={node.uid === selectedUid ? "active" : ""} x={worldX(node.absX)} y={worldY(node.absY)} width={NODE_W} height={NODE_H} rx="12" />)}
               </svg>
-              <span>点击适应全部节点</span>
+              <span>全局布局图 · 点击适应全部节点</span>
             </button>
           </section>
 
