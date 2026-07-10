@@ -74,7 +74,7 @@ const LOCALISATION_LANGUAGES = [
 
 type LocalisationLanguage = (typeof LOCALISATION_LANGUAGES)[number]["code"];
 
-const DEFAULT_LOCALISATION_LANGUAGE: LocalisationLanguage = "simp_chinese";
+const DEFAULT_LOCALISATION_LANGUAGE: LocalisationLanguage = "english";
 
 function isLocalisationLanguage(value: unknown): value is LocalisationLanguage {
   return typeof value === "string" && LOCALISATION_LANGUAGES.some((language) => language.code === value);
@@ -85,7 +85,7 @@ function isUiLanguage(value: unknown): value is UiLanguage {
 }
 
 function localisationSettings(language: LocalisationLanguage) {
-  return LOCALISATION_LANGUAGES.find((item) => item.code === language) ?? LOCALISATION_LANGUAGES[8];
+  return LOCALISATION_LANGUAGES.find((item) => item.code === language) ?? LOCALISATION_LANGUAGES[0];
 }
 
 function localisationLabel(language: LocalisationLanguage, uiLanguage: UiLanguage) {
@@ -415,8 +415,8 @@ const initialProject: ProjectState = {
     {
       uid: "root-rebuild",
       id: "TAG_national_reconstruction",
-      name: "国家重建",
-      description: "重新整合国家机构，为未来的发展奠定稳定基础。",
+      name: "National Reconstruction",
+      description: "Rebuild the institutions of state and lay a stable foundation for the nation's future.",
       days: 70,
       absX: 0,
       absY: 0,
@@ -428,8 +428,8 @@ const initialProject: ProjectState = {
     {
       uid: "industrial-recovery",
       id: "TAG_industrial_recovery",
-      name: "工业复兴",
-      description: "重建国家工业基础，解锁新的生产能力。",
+      name: "Industrial Recovery",
+      description: "Restore the industrial base and unlock new productive capacity.",
       days: 70,
       absX: -2,
       absY: 2,
@@ -441,8 +441,8 @@ const initialProject: ProjectState = {
     {
       uid: "army-reform",
       id: "TAG_army_reform",
-      name: "军备整顿",
-      description: "整顿军备体系，为陆军现代化做好准备。",
+      name: "Army Reorganization",
+      description: "Reorganize the armed forces and prepare the army for modernization.",
       days: 70,
       absX: 2,
       absY: 2,
@@ -454,8 +454,8 @@ const initialProject: ProjectState = {
     {
       uid: "research-cooperation",
       id: "TAG_research_cooperation",
-      name: "科研合作",
-      description: "联合大学与工业实验室，加快技术成果转化。",
+      name: "Research Cooperation",
+      description: "Unite universities and industrial laboratories to accelerate technological progress.",
       days: 70,
       absX: -2,
       absY: 4,
@@ -467,8 +467,8 @@ const initialProject: ProjectState = {
     {
       uid: "homeland-defense",
       id: "TAG_homeland_defense",
-      name: "国土防线",
-      description: "加固边境与战略要地，建立纵深防御体系。",
+      name: "Homeland Defense",
+      description: "Fortify the border and key strategic positions to establish a defense in depth.",
       days: 70,
       absX: 2,
       absY: 4,
