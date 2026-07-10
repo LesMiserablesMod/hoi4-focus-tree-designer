@@ -866,7 +866,7 @@ button:disabled {
   background-color: #d9c9aa;
   background-image:
     linear-gradient(rgba(242, 232, 210, 0.08), rgba(242, 232, 210, 0.2)),
-    url("/focus-art-strip.png");
+    url("/hoi4-focus-tree-designer/focus-art-strip.png");
   background-position: 0 0, 0% center;
   background-repeat: no-repeat;
   background-size: 100% 100%, 500% 100%;
