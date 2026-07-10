@@ -54,9 +54,342 @@ type FocusNode = {
   artwork: number;
 };
 
+type UiLanguage = "zh-CN" | "en";
+
+const DEFAULT_UI_LANGUAGE: UiLanguage = "zh-CN";
+const UI_LANGUAGE_STORAGE_KEY = "hoi4-focus-tree-ui-language";
+
+const LOCALISATION_LANGUAGES = [
+  { code: "english", labels: { "zh-CN": "英语（English）", en: "English" } },
+  { code: "french", labels: { "zh-CN": "法语（Français）", en: "French" } },
+  { code: "german", labels: { "zh-CN": "德语（Deutsch）", en: "German" } },
+  { code: "polish", labels: { "zh-CN": "波兰语（Polski）", en: "Polish" } },
+  { code: "braz_por", labels: { "zh-CN": "巴西葡萄牙语（Português do Brasil）", en: "Portuguese (Brazil)" } },
+  { code: "russian", labels: { "zh-CN": "俄语（Русский）", en: "Russian" } },
+  { code: "spanish", labels: { "zh-CN": "西班牙语（Español）", en: "Spanish" } },
+  { code: "japanese", labels: { "zh-CN": "日语（日本語）", en: "Japanese" } },
+  { code: "simp_chinese", labels: { "zh-CN": "简体中文", en: "Simplified Chinese" } },
+  { code: "korean", labels: { "zh-CN": "韩语（한국어）", en: "Korean" } },
+] as const;
+
+type LocalisationLanguage = (typeof LOCALISATION_LANGUAGES)[number]["code"];
+
+const DEFAULT_LOCALISATION_LANGUAGE: LocalisationLanguage = "simp_chinese";
+
+function isLocalisationLanguage(value: unknown): value is LocalisationLanguage {
+  return typeof value === "string" && LOCALISATION_LANGUAGES.some((language) => language.code === value);
+}
+
+function isUiLanguage(value: unknown): value is UiLanguage {
+  return value === "zh-CN" || value === "en";
+}
+
+function localisationSettings(language: LocalisationLanguage) {
+  return LOCALISATION_LANGUAGES.find((item) => item.code === language) ?? LOCALISATION_LANGUAGES[8];
+}
+
+function localisationLabel(language: LocalisationLanguage, uiLanguage: UiLanguage) {
+  return localisationSettings(language).labels[uiLanguage];
+}
+
+function detectLocalisationLanguage(text: string): LocalisationLanguage | null {
+  const match = text.replace(/^\uFEFF/, "").match(/^\s*l_([A-Za-z_]+)\s*:/m);
+  return isLocalisationLanguage(match?.[1]) ? match[1] : null;
+}
+
+const UI_MESSAGES = {
+  "zh-CN": {
+    pageTitle: "HOI4 国策树设计器",
+    appTitle: "国策树设计器",
+    interfaceLanguage: "界面语言",
+    chineseInterface: "中文界面",
+    englishInterface: "English interface",
+    viewMode: "视图模式",
+    canvas: "画布",
+    codePreview: "代码预览",
+    saving: "保存中",
+    saved: "已保存",
+    undo: "撤销",
+    redo: "重做",
+    save: "保存",
+    import: "导入",
+    addFocus: "添加国策",
+    focusProperties: "国策属性",
+    focusId: "国策 ID",
+    localisationName: "本地化名称",
+    localisationDescription: "本地化描述",
+    completionDays: "完成天数",
+    prerequisiteGroups: "前置条件组",
+    prerequisiteLogic: "组间 AND · 组内 OR",
+    addAndGroup: "添加 AND 组",
+    prerequisiteHelp: "每一组至少完成一个；存在多组时，需要每组都满足。",
+    noPrerequisite: "暂无前置国策",
+    and: "并且",
+    conditionGroup: (index: number) => `条件组 ${index}`,
+    anyCompleteOr: "任一完成 OR",
+    mustComplete: "必须完成",
+    deletePrerequisiteGroup: (index: number) => `删除前置条件组 ${index}`,
+    removePrerequisite: (name: string) => `移除前置国策 ${name}`,
+    addPrerequisite: (index: number) => `向前置条件组 ${index} 添加国策`,
+    addOrAlternative: " OR 备选",
+    addFocusOption: "国策",
+    mutualFocusGroup: "互斥国策组",
+    mutualLogic: "组内两两互斥",
+    mutualHelp: "组内每个国策都会显式列出其余全部成员，符合游戏引擎的读取方式。",
+    removeMutual: (name: string) => `移除互斥国策 ${name}`,
+    addMutual: "添加互斥国策",
+    joinMutualGroup: "加入互斥组",
+    noMutual: "尚未设置互斥关系",
+    relativeTo: "坐标相对于",
+    canvasOrigin: "画布原点",
+    relativeX: "相对 X",
+    relativeY: "相对 Y",
+    dragToEditCoordinates: "拖动节点即可修改坐标",
+    duplicate: "复制",
+    delete: "删除",
+    chooseFocus: "选择一个国策",
+    chooseFocusHelp: "点击画布节点以编辑 ID、名称、描述与关系。",
+    draggableCanvas: "可拖拽国策树画布",
+    focusCoordinate: (name: string, x: number, y: number) => `${name}，坐标 ${x}, ${y}`,
+    unnamedFocus: "未命名国策",
+    days: (value: number) => `${value} 日`,
+    canvasHelp: "拖动节点 · 方向键微调 · 滚轮缩放",
+    zoomControls: "缩放控制",
+    zoomOut: "缩小",
+    zoomIn: "放大",
+    fitCanvas: "适应画布",
+    gameFilePreview: "游戏文件预览",
+    copyAll: "复制全部",
+    download: "下载",
+    navigationAndExport: "导航与导出",
+    navigator: "导航器",
+    fitAllFocuses: "点击适应全部国策",
+    globalLayout: "全局布局图 · 点击适应全部节点",
+    projectSettings: "项目设置",
+    treeId: "国策树 ID",
+    countryTag: "国家 TAG",
+    localisationLanguage: "本地化语言",
+    localisationLanguageNote: "切换语言会更新 YML 文件头、路径与文件名，但不会自动翻译已填写文本。",
+    exportFiles: "导出文件",
+    focusScript: "国策脚本",
+    localisationExport: (language: string) => `${language}本地化`,
+    copyTwoFiles: "复制两份文件内容",
+    pasteFiles: "粘贴 TXT / YML 内容",
+    importNote: "导入仅解析布局、前置、互斥与本地化；高级效果和注释不会被覆盖保存。",
+    errorCount: (count: number) => `${count} 个错误`,
+    warningCount: (count: number) => `${count} 个提醒`,
+    readyToExport: "可以导出",
+    projectSummary: (focuses: number, prerequisites: number, mutuals: number) => `${focuses} 个国策 · ${prerequisites} 条前置 · ${mutuals} 条互斥`,
+    prerequisiteRelations: (count: number) => `${count} 条前置关系`,
+    mutualRelations: (count: number) => `${count} 条互斥关系`,
+    gridSnapOn: "网格吸附：开启",
+    selectedFocus: (id: string) => `选中：${id}`,
+    noSelectedFocus: "未选择节点",
+    focusCount: (count: number) => `${count} 个国策`,
+    closeToast: "关闭提示",
+    textImport: "粘贴文本导入",
+    closeTextImport: "关闭粘贴导入",
+    focusTreeScriptFile: "国策树脚本（.txt）",
+    optionalLocalisation: (language: string) => `${language}本地化（可选）`,
+    focusNamePlaceholder: "国策名称",
+    importModalWarning: "导入会替换当前画布；不支持的效果、图标与注释不会保留，请先保存原文件。",
+    cancel: "取消",
+    parseAndImport: "解析并导入",
+    damagedDraft: "本地草稿已损坏，已恢复示例国策树。",
+    autosaveUnavailable: "浏览器无法保存本地草稿，请及时导出。",
+    newFocusName: "新国策",
+    newFocusDescription: "在这里填写国策描述。",
+    newFocusCreated: "已创建新国策，可直接拖到目标位置。",
+    copySuffix: "（副本）",
+    keepOneFocus: "至少保留一个国策节点。",
+    nodeRemoved: "节点及其引用已安全移除。",
+    importedFocuses: (count: number) => `已导入 ${count} 个国策。高级效果与图标不会进入这个轻量布局项目。`,
+    missingLocalisationHeader: "本地化缺少受支持的 l_<language>: 文件头",
+    unsupportedLanguageCode: "本地化文件使用了尚不支持的语言代码",
+    localisationMerged: (language: string) => `${language}本地化已按国策 ID 合并。`,
+    noRecognizedImport: "未识别到 focus_tree 或本地化内容",
+    importFailed: (message: string) => `导入失败：${message}`,
+    unrecognizedText: "文本格式无法识别",
+    unrecognizedFile: "文件格式无法识别",
+    resolveErrorsBeforeExport: (count: number) => `请先处理 ${count} 个错误，再导出文件。`,
+    focusExported: "国策脚本 TXT 已生成。",
+    localisationExported: (language: string) => `${language}本地化 YML 已生成（UTF-8 BOM）。`,
+    copiedToClipboard: "脚本与本地化已复制到剪贴板。",
+    clipboardDenied: "浏览器未允许读取剪贴板，请使用下载按钮。",
+    draftSaved: "草稿已保存在当前浏览器。",
+    draftSaveFailed: "浏览器无法保存草稿。",
+    missingClosingBrace: (key: string) => `${key} 块缺少右花括号`,
+    noFocusTree: "没有找到 focus_tree = { ... }",
+    noFocusBlock: "国策树中没有找到 focus = { ... }",
+    relativeCoordinateCycle: (id: string) => `检测到相对坐标循环：${id}`,
+    invalidTreeId: "国策树 ID 为空或含无效字符",
+    invalidCountryTag: "国家 TAG 为空或含无效字符",
+    missingFocusId: "存在未填写 ID 的国策",
+    invalidFocusId: (id: string) => `${id}：ID 应以字母或下划线开头，且只含字母、数字、下划线`,
+    missingFocusName: (id: string) => `${id}：尚未填写名称`,
+    invalidDays: (id: string) => `${id}：完成天数必须是正整数`,
+    duplicateId: (id: string) => `${id}：ID 重复`,
+    emptyPrerequisiteGroup: (id: string, index: number) => `${id}：前置条件组 ${index} 为空`,
+    selfPrerequisite: (id: string) => `${id}：不能将自身设为前置国策`,
+    invalidPrerequisiteReference: (id: string) => `${id}：前置国策引用已失效`,
+    allPrerequisitesMutual: (id: string) => `${id}：某个前置条件组中的国策均与其互斥`,
+    selfMutual: (id: string) => `${id}：不能与自身互斥`,
+    invalidMutualReference: (id: string) => `${id}：互斥国策引用已失效`,
+    unsyncedMutual: (id: string) => `${id}：互斥关系未双向同步`,
+    prerequisiteDeadlock: "前置条件存在无法满足的循环或死锁",
+    relativeReferenceCycle: "相对坐标引用存在循环",
+    coordinateOverlap: (ids: string[]) => `${ids.join("、")}：坐标重叠`,
+  },
+  en: {
+    pageTitle: "HOI4 Focus Tree Designer",
+    appTitle: "Focus Tree Designer",
+    interfaceLanguage: "Interface language",
+    chineseInterface: "Chinese interface",
+    englishInterface: "English interface",
+    viewMode: "View mode",
+    canvas: "Canvas",
+    codePreview: "Code Preview",
+    saving: "Saving",
+    saved: "Saved",
+    undo: "Undo",
+    redo: "Redo",
+    save: "Save",
+    import: "Import",
+    addFocus: "Add Focus",
+    focusProperties: "Focus Properties",
+    focusId: "Focus ID",
+    localisationName: "Localisation Name",
+    localisationDescription: "Localisation Description",
+    completionDays: "Completion Days",
+    prerequisiteGroups: "Prerequisite Groups",
+    prerequisiteLogic: "AND between groups · OR within a group",
+    addAndGroup: "Add AND Group",
+    prerequisiteHelp: "Complete at least one focus in every group; all groups must be satisfied.",
+    noPrerequisite: "No prerequisites yet",
+    and: "and",
+    conditionGroup: (index: number) => `Group ${index}`,
+    anyCompleteOr: "Any one · OR",
+    mustComplete: "Required",
+    deletePrerequisiteGroup: (index: number) => `Delete prerequisite group ${index}`,
+    removePrerequisite: (name: string) => `Remove prerequisite ${name}`,
+    addPrerequisite: (index: number) => `Add a focus to prerequisite group ${index}`,
+    addOrAlternative: " OR alternative",
+    addFocusOption: "focus",
+    mutualFocusGroup: "Mutually Exclusive Group",
+    mutualLogic: "Every pair is exclusive",
+    mutualHelp: "Every focus explicitly lists every other member, matching how the game engine reads mutual exclusions.",
+    removeMutual: (name: string) => `Remove mutually exclusive focus ${name}`,
+    addMutual: "Add mutually exclusive focus",
+    joinMutualGroup: "Join mutual group",
+    noMutual: "No mutual exclusions set",
+    relativeTo: "Coordinates relative to",
+    canvasOrigin: "Canvas origin",
+    relativeX: "Relative X",
+    relativeY: "Relative Y",
+    dragToEditCoordinates: "Drag the node to change its coordinates",
+    duplicate: "Duplicate",
+    delete: "Delete",
+    chooseFocus: "Select a Focus",
+    chooseFocusHelp: "Click a canvas node to edit its ID, localisation, and relationships.",
+    draggableCanvas: "Draggable focus tree canvas",
+    focusCoordinate: (name: string, x: number, y: number) => `${name}, coordinates ${x}, ${y}`,
+    unnamedFocus: "Unnamed Focus",
+    days: (value: number) => `${value} days`,
+    canvasHelp: "Drag nodes · Arrow keys to nudge · Wheel to zoom",
+    zoomControls: "Zoom controls",
+    zoomOut: "Zoom out",
+    zoomIn: "Zoom in",
+    fitCanvas: "Fit canvas",
+    gameFilePreview: "Game File Preview",
+    copyAll: "Copy All",
+    download: "Download",
+    navigationAndExport: "Navigation and export",
+    navigator: "Navigator",
+    fitAllFocuses: "Fit all focuses",
+    globalLayout: "Full layout · Click to fit all nodes",
+    projectSettings: "Project Settings",
+    treeId: "Focus Tree ID",
+    countryTag: "Country TAG",
+    localisationLanguage: "Localisation Language",
+    localisationLanguageNote: "Changing this updates the YML header, path, and filename. Existing text is not translated automatically.",
+    exportFiles: "Export Files",
+    focusScript: "Focus Script",
+    localisationExport: (language: string) => `${language} Localisation`,
+    copyTwoFiles: "Copy both file contents",
+    pasteFiles: "Paste TXT / YML Content",
+    importNote: "Import reads layout, prerequisites, mutual exclusions, and localisation only. Advanced effects and comments are not preserved.",
+    errorCount: (count: number) => `${count} ${count === 1 ? "error" : "errors"}`,
+    warningCount: (count: number) => `${count} ${count === 1 ? "warning" : "warnings"}`,
+    readyToExport: "Ready to Export",
+    projectSummary: (focuses: number, prerequisites: number, mutuals: number) => `${focuses} ${focuses === 1 ? "focus" : "focuses"} · ${prerequisites} ${prerequisites === 1 ? "prerequisite" : "prerequisites"} · ${mutuals} mutual ${mutuals === 1 ? "link" : "links"}`,
+    prerequisiteRelations: (count: number) => `${count} prerequisite ${count === 1 ? "link" : "links"}`,
+    mutualRelations: (count: number) => `${count} mutual ${count === 1 ? "link" : "links"}`,
+    gridSnapOn: "Grid snap: On",
+    selectedFocus: (id: string) => `Selected: ${id}`,
+    noSelectedFocus: "No node selected",
+    focusCount: (count: number) => `${count} ${count === 1 ? "focus" : "focuses"}`,
+    closeToast: "Dismiss notification",
+    textImport: "Paste Text Import",
+    closeTextImport: "Close text import",
+    focusTreeScriptFile: "Focus tree script (.txt)",
+    optionalLocalisation: (language: string) => `${language} localisation (optional)`,
+    focusNamePlaceholder: "Focus name",
+    importModalWarning: "Import replaces the current canvas. Unsupported effects, icons, and comments are not preserved; save the original files first.",
+    cancel: "Cancel",
+    parseAndImport: "Parse and Import",
+    damagedDraft: "The local draft was damaged, so the example tree has been restored.",
+    autosaveUnavailable: "This browser cannot save the local draft. Export your work to avoid losing it.",
+    newFocusName: "New Focus",
+    newFocusDescription: "Enter the focus description here.",
+    newFocusCreated: "New focus created. Drag it to the desired position.",
+    copySuffix: " (copy)",
+    keepOneFocus: "Keep at least one focus node.",
+    nodeRemoved: "The node and its references were removed safely.",
+    importedFocuses: (count: number) => `Imported ${count} ${count === 1 ? "focus" : "focuses"}. Advanced effects and icons are not retained in this lightweight layout project.`,
+    missingLocalisationHeader: "The localisation text needs a supported l_<language>: header",
+    unsupportedLanguageCode: "The localisation file uses an unsupported language code",
+    localisationMerged: (language: string) => `${language} localisation was merged by focus ID.`,
+    noRecognizedImport: "No focus_tree or localisation content was recognized",
+    importFailed: (message: string) => `Import failed: ${message}`,
+    unrecognizedText: "The text format could not be recognized",
+    unrecognizedFile: "The file format could not be recognized",
+    resolveErrorsBeforeExport: (count: number) => `Resolve ${count} ${count === 1 ? "error" : "errors"} before exporting.`,
+    focusExported: "Focus script TXT generated.",
+    localisationExported: (language: string) => `${language} localisation YML generated with a UTF-8 BOM.`,
+    copiedToClipboard: "The script and localisation were copied to the clipboard.",
+    clipboardDenied: "Clipboard access was denied. Use the download buttons instead.",
+    draftSaved: "Draft saved in this browser.",
+    draftSaveFailed: "This browser could not save the draft.",
+    missingClosingBrace: (key: string) => `${key} block is missing a closing brace`,
+    noFocusTree: "No focus_tree = { ... } block was found",
+    noFocusBlock: "No focus = { ... } block was found in the focus tree",
+    relativeCoordinateCycle: (id: string) => `Relative coordinate cycle detected at ${id}`,
+    invalidTreeId: "The focus tree ID is empty or contains invalid characters",
+    invalidCountryTag: "The country TAG is empty or contains invalid characters",
+    missingFocusId: "At least one focus has no ID",
+    invalidFocusId: (id: string) => `${id}: IDs must start with a letter or underscore and contain only letters, numbers, and underscores`,
+    missingFocusName: (id: string) => `${id}: localisation name is empty`,
+    invalidDays: (id: string) => `${id}: completion days must be a positive integer`,
+    duplicateId: (id: string) => `${id}: duplicate ID`,
+    emptyPrerequisiteGroup: (id: string, index: number) => `${id}: prerequisite group ${index} is empty`,
+    selfPrerequisite: (id: string) => `${id}: a focus cannot be its own prerequisite`,
+    invalidPrerequisiteReference: (id: string) => `${id}: a prerequisite reference is invalid`,
+    allPrerequisitesMutual: (id: string) => `${id}: every focus in one prerequisite group is mutually exclusive with this focus`,
+    selfMutual: (id: string) => `${id}: a focus cannot be mutually exclusive with itself`,
+    invalidMutualReference: (id: string) => `${id}: a mutually exclusive reference is invalid`,
+    unsyncedMutual: (id: string) => `${id}: a mutual exclusion is not synchronized both ways`,
+    prerequisiteDeadlock: "Prerequisites contain an unsatisfiable cycle or deadlock",
+    relativeReferenceCycle: "Relative coordinate references contain a cycle",
+    coordinateOverlap: (ids: string[]) => `${ids.join(", ")}: coordinates overlap`,
+  },
+} as const;
+
+type UiMessages = (typeof UI_MESSAGES)[UiLanguage];
+
 type ProjectState = {
   treeId: string;
   countryTag: string;
+  localisationLanguage: LocalisationLanguage;
   nodes: FocusNode[];
 };
 
@@ -77,6 +410,7 @@ const LEGACY_STORAGE_KEY = "hoi4-focus-tree-studio-v1";
 const initialProject: ProjectState = {
   treeId: "TAG_national_focus",
   countryTag: "TAG",
+  localisationLanguage: DEFAULT_LOCALISATION_LANGUAGE,
   nodes: [
     {
       uid: "root-rebuild",
@@ -201,6 +535,7 @@ function normalizeProject(value: unknown): ProjectState | null {
   const raw = value as {
     treeId?: unknown;
     countryTag?: unknown;
+    localisationLanguage?: unknown;
     nodes?: unknown;
   };
   if (!Array.isArray(raw.nodes) || !raw.nodes.length) return null;
@@ -246,6 +581,9 @@ function normalizeProject(value: unknown): ProjectState | null {
   return {
     treeId: typeof raw.treeId === "string" ? raw.treeId : "custom_focus_tree",
     countryTag: typeof raw.countryTag === "string" ? raw.countryTag : "TAG",
+    localisationLanguage: isLocalisationLanguage(raw.localisationLanguage)
+      ? raw.localisationLanguage
+      : DEFAULT_LOCALISATION_LANGUAGE,
     nodes,
   };
 }
@@ -346,7 +684,7 @@ function generateLocalisation(project: ProjectState) {
       ` ${safeToken(node.id, "unnamed_focus")}:0 "${escapeLocalisation(node.name || node.id)}"`,
       ` ${safeToken(node.id, "unnamed_focus")}_desc:0 "${escapeLocalisation(node.description)}"`,
     ]);
-  return `l_simp_chinese:\n${lines.join("\n")}\n`;
+  return `l_${project.localisationLanguage}:\n${lines.join("\n")}\n`;
 }
 
 function findMatchingBrace(text: string, openIndex: number) {
@@ -375,14 +713,14 @@ function findMatchingBrace(text: string, openIndex: number) {
   return -1;
 }
 
-function extractBlocks(text: string, key: string) {
+function extractBlocks(text: string, key: string, uiLanguage: UiLanguage = DEFAULT_UI_LANGUAGE) {
   const blocks: string[] = [];
   const matcher = new RegExp(`\\b${key}\\s*=\\s*\\{`, "g");
   let match: RegExpExecArray | null;
   while ((match = matcher.exec(text))) {
     const openIndex = text.indexOf("{", match.index);
     const closeIndex = findMatchingBrace(text, openIndex);
-    if (closeIndex < 0) throw new Error(`${key} 块缺少右花括号`);
+    if (closeIndex < 0) throw new Error(UI_MESSAGES[uiLanguage].missingClosingBrace(key));
     blocks.push(text.slice(openIndex + 1, closeIndex));
     matcher.lastIndex = closeIndex + 1;
   }
@@ -404,12 +742,18 @@ function parseLocalisation(text: string) {
   return entries;
 }
 
-function parseFocusScript(text: string, localisation: Map<string, string>) {
-  const treeBlocks = extractBlocks(text.replace(/^\uFEFF/, ""), "focus_tree");
-  if (!treeBlocks.length) throw new Error("没有找到 focus_tree = { ... }");
+function parseFocusScript(
+  text: string,
+  localisation: Map<string, string>,
+  localisationLanguage: LocalisationLanguage = DEFAULT_LOCALISATION_LANGUAGE,
+  uiLanguage: UiLanguage = DEFAULT_UI_LANGUAGE,
+) {
+  const ui = UI_MESSAGES[uiLanguage];
+  const treeBlocks = extractBlocks(text.replace(/^\uFEFF/, ""), "focus_tree", uiLanguage);
+  if (!treeBlocks.length) throw new Error(ui.noFocusTree);
   const treeBlock = treeBlocks[0];
-  const focusBlocks = extractBlocks(treeBlock, "focus");
-  if (!focusBlocks.length) throw new Error("国策树中没有找到 focus = { ... }");
+  const focusBlocks = extractBlocks(treeBlock, "focus", uiLanguage);
+  if (!focusBlocks.length) throw new Error(ui.noFocusBlock);
 
   const raw = focusBlocks.map((block, index) => {
     const id = scalar(block, "id") || `imported_focus_${index + 1}`;
@@ -420,10 +764,10 @@ function parseFocusScript(text: string, localisation: Map<string, string>) {
       while ((match = matcher.exec(relationBlock))) ids.push(match[1] ?? match[2]);
       return ids;
     };
-    const prerequisiteIdGroups = extractBlocks(block, "prerequisite")
+    const prerequisiteIdGroups = extractBlocks(block, "prerequisite", uiLanguage)
       .map(focusIdsInBlock)
       .filter((group) => group.length);
-    const mutuallyExclusiveIds = extractBlocks(block, "mutually_exclusive").flatMap(focusIdsInBlock);
+    const mutuallyExclusiveIds = extractBlocks(block, "mutually_exclusive", uiLanguage).flatMap(focusIdsInBlock);
     const parsedCost = Number.parseFloat(scalar(block, "cost") || "10");
     return {
       id,
@@ -444,7 +788,7 @@ function parseFocusScript(text: string, localisation: Map<string, string>) {
     if (cached) return cached;
     const node = rawById.get(id);
     if (!node) return { x: 0, y: 0 };
-    if (trail.has(id)) throw new Error(`检测到相对坐标循环：${id}`);
+    if (trail.has(id)) throw new Error(ui.relativeCoordinateCycle(id));
     trail.add(id);
     const anchor = node.relativeId ? resolve(node.relativeId, trail) : { x: 0, y: 0 };
     const result = { x: node.x + anchor.x, y: node.y + anchor.y };
@@ -478,43 +822,45 @@ function parseFocusScript(text: string, localisation: Map<string, string>) {
   return {
     treeId: scalar(treeBlock, "id") || "imported_focus_tree",
     countryTag: scalar(treeBlock, "tag") || "TAG",
+    localisationLanguage,
     nodes,
   } satisfies ProjectState;
 }
 
-function validationFor(project: ProjectState) {
+function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
+  const ui = UI_MESSAGES[uiLanguage];
   const errors: string[] = [];
   const warnings: string[] = [];
   const ids = new Map<string, number>();
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.treeId.trim())) errors.push("国策树 ID 为空或含无效字符");
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.countryTag.trim())) errors.push("国家 TAG 为空或含无效字符");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.treeId.trim())) errors.push(ui.invalidTreeId);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.countryTag.trim())) errors.push(ui.invalidCountryTag);
   project.nodes.forEach((node) => {
     const id = node.id.trim();
     ids.set(id, (ids.get(id) ?? 0) + 1);
-    if (!id) errors.push("存在未填写 ID 的国策");
-    else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) errors.push(`${id}：ID 应以字母或下划线开头，且只含字母、数字、下划线`);
-    if (!node.name.trim()) warnings.push(`${id || "未命名国策"}：尚未填写名称`);
-    if (!Number.isInteger(node.days) || node.days < 1) errors.push(`${id || "未命名国策"}：完成天数必须是正整数`);
+    if (!id) errors.push(ui.missingFocusId);
+    else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) errors.push(ui.invalidFocusId(id));
+    if (!node.name.trim()) warnings.push(ui.missingFocusName(id || ui.unnamedFocus));
+    if (!Number.isInteger(node.days) || node.days < 1) errors.push(ui.invalidDays(id || ui.unnamedFocus));
   });
   ids.forEach((count, id) => {
-    if (id && count > 1) errors.push(`${id}：ID 重复`);
+    if (id && count > 1) errors.push(ui.duplicateId(id));
   });
 
   const nodeByUid = new Map(project.nodes.map((node) => [node.uid, node]));
   project.nodes.forEach((node) => {
     node.prerequisiteGroups.forEach((group, index) => {
-      if (!group.length) warnings.push(`${node.id}：前置条件组 ${index + 1} 为空`);
-      if (group.includes(node.uid)) errors.push(`${node.id}：不能将自身设为前置国策`);
-      if (group.some((uid) => !nodeByUid.has(uid))) errors.push(`${node.id}：前置国策引用已失效`);
+      if (!group.length) warnings.push(ui.emptyPrerequisiteGroup(node.id, index + 1));
+      if (group.includes(node.uid)) errors.push(ui.selfPrerequisite(node.id));
+      if (group.some((uid) => !nodeByUid.has(uid))) errors.push(ui.invalidPrerequisiteReference(node.id));
       if (group.length && group.every((uid) => node.mutuallyExclusiveUids.includes(uid))) {
-        errors.push(`${node.id}：某个前置条件组中的国策均与其互斥`);
+        errors.push(ui.allPrerequisitesMutual(node.id));
       }
     });
     node.mutuallyExclusiveUids.forEach((uid) => {
-      if (uid === node.uid) errors.push(`${node.id}：不能与自身互斥`);
+      if (uid === node.uid) errors.push(ui.selfMutual(node.id));
       const other = nodeByUid.get(uid);
-      if (!other) errors.push(`${node.id}：互斥国策引用已失效`);
-      else if (!other.mutuallyExclusiveUids.includes(node.uid)) warnings.push(`${node.id}：互斥关系未双向同步`);
+      if (!other) errors.push(ui.invalidMutualReference(node.id));
+      else if (!other.mutuallyExclusiveUids.includes(node.uid)) warnings.push(ui.unsyncedMutual(node.id));
     });
   });
 
@@ -531,7 +877,7 @@ function validationFor(project: ProjectState) {
       }
     });
   }
-  if (reachable.size !== project.nodes.length) errors.push("前置条件存在无法满足的循环或死锁");
+  if (reachable.size !== project.nodes.length) errors.push(ui.prerequisiteDeadlock);
 
   const visitRelative = (uid: string, path: Set<string>): boolean => {
     if (path.has(uid)) return true;
@@ -539,7 +885,7 @@ function validationFor(project: ProjectState) {
     if (!node?.relativeToUid) return false;
     return visitRelative(node.relativeToUid, new Set(path).add(uid));
   };
-  if (project.nodes.some((node) => visitRelative(node.uid, new Set()))) errors.push("相对坐标引用存在循环");
+  if (project.nodes.some((node) => visitRelative(node.uid, new Set()))) errors.push(ui.relativeReferenceCycle);
 
   const occupied = new Map<string, string[]>();
   project.nodes.forEach((node) => {
@@ -547,7 +893,7 @@ function validationFor(project: ProjectState) {
     occupied.set(key, [...(occupied.get(key) ?? []), node.id]);
   });
   occupied.forEach((nodeIds) => {
-    if (nodeIds.length > 1) warnings.push(`${nodeIds.join("、")}：坐标重叠`);
+    if (nodeIds.length > 1) warnings.push(ui.coordinateOverlap(nodeIds));
   });
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
 }
@@ -629,10 +975,11 @@ type PrerequisiteEditorProps = {
   nodes: FocusNode[];
   currentUid: string;
   groups: string[][];
+  ui: UiMessages;
   onChange: (groups: string[][]) => void;
 };
 
-function PrerequisiteEditor({ nodes, currentUid, groups, onChange }: PrerequisiteEditorProps) {
+function PrerequisiteEditor({ nodes, currentUid, groups, ui, onChange }: PrerequisiteEditorProps) {
   const candidates = nodes.filter((node) => node.uid !== currentUid);
   const updateGroup = (index: number, nextGroup: string[]) => {
     onChange(groups.map((group, groupIndex) => groupIndex === index ? [...new Set(nextGroup)] : group));
@@ -641,35 +988,35 @@ function PrerequisiteEditor({ nodes, currentUid, groups, onChange }: Prerequisit
   return (
     <section className="relation-editor prerequisite-editor">
       <div className="relation-editor-head">
-        <div><strong>前置条件组</strong><span>组间 AND · 组内 OR</span></div>
-        <button type="button" onClick={() => onChange([...groups, []])}><Plus size={13} />添加 AND 组</button>
+        <div><strong>{ui.prerequisiteGroups}</strong><span>{ui.prerequisiteLogic}</span></div>
+        <button type="button" onClick={() => onChange([...groups, []])}><Plus size={13} />{ui.addAndGroup}</button>
       </div>
-      <p className="relation-help">每一组至少完成一个；存在多组时，需要每组都满足。</p>
-      {!groups.length && <div className="relation-empty">暂无前置国策</div>}
+      <p className="relation-help">{ui.prerequisiteHelp}</p>
+      {!groups.length && <div className="relation-empty">{ui.noPrerequisite}</div>}
       {groups.map((group, index) => (
         <div key={`prerequisite-group-${index}`}>
-          {index > 0 && <div className="relation-and"><span>AND</span>并且</div>}
+          {index > 0 && <div className="relation-and"><span>AND</span>{ui.and}</div>}
           <div className="relation-group-card">
             <div className="relation-group-top">
-              <span>条件组 {index + 1}</span>
-              <em>{group.length > 1 ? "任一完成 OR" : "必须完成"}</em>
-              <button type="button" onClick={() => onChange(groups.filter((_, groupIndex) => groupIndex !== index))} aria-label={`删除前置条件组 ${index + 1}`}><X size={13} /></button>
+              <span>{ui.conditionGroup(index + 1)}</span>
+              <em>{group.length > 1 ? ui.anyCompleteOr : ui.mustComplete}</em>
+              <button type="button" onClick={() => onChange(groups.filter((_, groupIndex) => groupIndex !== index))} aria-label={ui.deletePrerequisiteGroup(index + 1)}><X size={13} /></button>
             </div>
             <div className="relation-chips">
               {group.map((uid) => {
                 const node = nodes.find((item) => item.uid === uid);
                 if (!node) return null;
-                return <span className="relation-chip" key={uid}>{node.name || node.id}<button type="button" onClick={() => updateGroup(index, group.filter((item) => item !== uid))} aria-label={`移除前置国策 ${node.name || node.id}`}><X size={11} /></button></span>;
+                return <span className="relation-chip" key={uid}>{node.name || node.id}<button type="button" onClick={() => updateGroup(index, group.filter((item) => item !== uid))} aria-label={ui.removePrerequisite(node.name || node.id)}><X size={11} /></button></span>;
               })}
               <select
                 className="relation-add-select"
                 value=""
-                aria-label={`向前置条件组 ${index + 1} 添加国策`}
+                aria-label={ui.addPrerequisite(index + 1)}
                 onChange={(event) => {
                   if (event.target.value) updateGroup(index, [...group, event.target.value]);
                 }}
               >
-                <option value="">＋ 添加{group.length ? " OR 备选" : "国策"}</option>
+                <option value="">＋ {ui.addFocus}{group.length ? ui.addOrAlternative : ` ${ui.addFocusOption}`}</option>
                 {candidates.filter((node) => !group.includes(node.uid)).map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
               </select>
             </div>
@@ -684,44 +1031,46 @@ type MutualEditorProps = {
   nodes: FocusNode[];
   currentUid: string;
   values: string[];
+  ui: UiMessages;
   onChange: (uids: string[]) => void;
 };
 
-function MutualEditor({ nodes, currentUid, values, onChange }: MutualEditorProps) {
+function MutualEditor({ nodes, currentUid, values, ui, onChange }: MutualEditorProps) {
   const candidates = nodes.filter((node) => node.uid !== currentUid && !values.includes(node.uid));
   return (
     <section className="relation-editor mutual-editor">
       <div className="relation-editor-head">
-        <div><strong>互斥国策组</strong><span>组内两两互斥</span></div>
+        <div><strong>{ui.mutualFocusGroup}</strong><span>{ui.mutualLogic}</span></div>
         <Ban size={15} />
       </div>
-      <p className="relation-help">组内每个国策都会显式列出其余全部成员，符合游戏引擎的读取方式。</p>
+      <p className="relation-help">{ui.mutualHelp}</p>
       <div className="relation-group-card mutual-card">
         <div className="relation-chips">
           {values.map((uid) => {
             const node = nodes.find((item) => item.uid === uid);
             if (!node) return null;
-            return <span className="relation-chip mutual" key={uid}>{node.name || node.id}<button type="button" onClick={() => onChange(values.filter((item) => item !== uid))} aria-label={`移除互斥国策 ${node.name || node.id}`}><X size={11} /></button></span>;
+            return <span className="relation-chip mutual" key={uid}>{node.name || node.id}<button type="button" onClick={() => onChange(values.filter((item) => item !== uid))} aria-label={ui.removeMutual(node.name || node.id)}><X size={11} /></button></span>;
           })}
           <select
             className="relation-add-select"
             value=""
-            aria-label="添加互斥国策"
+            aria-label={ui.addMutual}
             onChange={(event) => {
               if (event.target.value) onChange([...values, event.target.value]);
             }}
           >
-            <option value="">＋ 加入互斥组</option>
+            <option value="">＋ {ui.joinMutualGroup}</option>
             {candidates.map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
           </select>
         </div>
-        {!values.length && <span className="inline-empty">尚未设置互斥关系</span>}
+        {!values.length && <span className="inline-empty">{ui.noMutual}</span>}
       </div>
     </section>
   );
 }
 
 export default function Home() {
+  const [uiLanguage, setUiLanguage] = useState<UiLanguage>(DEFAULT_UI_LANGUAGE);
   const [project, setProject] = useState<ProjectState>(initialProject);
   const [selectedUid, setSelectedUid] = useState(initialProject.nodes[1].uid);
   const [past, setPast] = useState<ProjectState[]>([]);
@@ -754,7 +1103,12 @@ export default function Home() {
     startY: number;
   } | null>(null);
 
+  const ui = UI_MESSAGES[uiLanguage];
   const selected = project.nodes.find((node) => node.uid === selectedUid) ?? null;
+  const activeLocalisationLabel = localisationLabel(project.localisationLanguage, uiLanguage);
+  const safeTreeId = safeToken(project.treeId, "focus_tree");
+  const focusFilename = `${safeTreeId}.txt`;
+  const localisationFilename = `${safeTreeId}_l_${project.localisationLanguage}.yml`;
   const nodeByUid = useMemo(() => new Map(project.nodes.map((node) => [node.uid, node])), [project.nodes]);
   const prerequisiteEdges = useMemo(() => {
     const edges = new Map<string, { parentUid: string; childUid: string; isOr: boolean }>();
@@ -780,7 +1134,7 @@ export default function Home() {
     });
     return [...pairs.values()];
   }, [nodeByUid, project.nodes]);
-  const validation = useMemo(() => validationFor(project), [project]);
+  const validation = useMemo(() => validationFor(project, uiLanguage), [project, uiLanguage]);
   const focusScript = useMemo(() => generateFocusScript(project), [project]);
   const localisation = useMemo(() => generateLocalisation(project), [project]);
   const minimapBounds = useMemo(() => {
@@ -805,6 +1159,8 @@ export default function Home() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
+        const savedUiLanguage = window.localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
+        if (isUiLanguage(savedUiLanguage)) setUiLanguage(savedUiLanguage);
         const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
         if (saved) {
           const parsed = normalizeProject(JSON.parse(saved));
@@ -814,7 +1170,7 @@ export default function Home() {
           }
         }
       } catch {
-        setToast({ tone: "warning", message: "本地草稿已损坏，已恢复示例国策树。" });
+        setToast({ tone: "warning", message: UI_MESSAGES[DEFAULT_UI_LANGUAGE].damagedDraft });
       } finally {
         setReady(true);
       }
@@ -829,11 +1185,22 @@ export default function Home() {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
         setSaveState("saved");
       } catch {
-        setToast({ tone: "warning", message: "浏览器无法保存本地草稿，请及时导出。" });
+        setToast({ tone: "warning", message: ui.autosaveUnavailable });
       }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [project, ready]);
+  }, [project, ready, ui.autosaveUnavailable]);
+
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      window.localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, uiLanguage);
+    } catch {
+      // The interface still switches for this session when storage is unavailable.
+    }
+    document.documentElement.lang = uiLanguage;
+    document.title = ui.pageTitle;
+  }, [ready, ui.pageTitle, uiLanguage]);
 
   useEffect(() => {
     if (!toast) return;
@@ -946,8 +1313,8 @@ export default function Home() {
     const node: FocusNode = {
       uid: `focus-${uidIndex}`,
       id: `${safeToken(project.countryTag.toUpperCase(), "TAG")}_new_focus_${index}`,
-      name: "新国策",
-      description: "在这里填写国策描述。",
+      name: ui.newFocusName,
+      description: ui.newFocusDescription,
       days: 70,
       absX: position.x,
       absY: position.y,
@@ -959,7 +1326,7 @@ export default function Home() {
     commit({ ...project, nodes: [...project.nodes, node] });
     setSelectedUid(node.uid);
     setMode("edit");
-    setToast({ tone: "success", message: "已创建新国策，可直接拖到目标位置。" });
+    setToast({ tone: "success", message: ui.newFocusCreated });
   }
 
   function duplicateNode(uid: string) {
@@ -971,7 +1338,7 @@ export default function Home() {
       ...source,
       uid: `${source.uid}-copy-${copyIndex}`,
       id: `${source.id}_copy`,
-      name: `${source.name}（副本）`,
+      name: `${source.name}${ui.copySuffix}`,
       absX: source.absX + 1,
       absY: source.absY + 1,
       prerequisiteGroups: source.prerequisiteGroups.map((group) => [...group]),
@@ -983,7 +1350,7 @@ export default function Home() {
 
   function removeNode(uid: string) {
     if (project.nodes.length <= 1) {
-      setToast({ tone: "warning", message: "至少保留一个国策节点。" });
+      setToast({ tone: "warning", message: ui.keepOneFocus });
       return;
     }
     const nextNodes = project.nodes
@@ -998,7 +1365,7 @@ export default function Home() {
       }));
     commit({ ...project, nodes: nextNodes });
     setSelectedUid(nextNodes[0]?.uid ?? "");
-    setToast({ tone: "success", message: "节点及其引用已安全移除。" });
+    setToast({ tone: "success", message: ui.nodeRemoved });
   }
 
   function moveNodeBy(uid: string, deltaX: number, deltaY: number) {
@@ -1138,27 +1505,35 @@ export default function Home() {
     });
   }
 
-  function applyImportedProject(focusText: string, localisationMap: Map<string, string>) {
-    const imported = parseFocusScript(focusText, localisationMap);
+  function applyImportedProject(
+    focusText: string,
+    localisationMap: Map<string, string>,
+    localisationLanguage: LocalisationLanguage = projectRef.current.localisationLanguage,
+  ) {
+    const imported = parseFocusScript(focusText, localisationMap, localisationLanguage, uiLanguage);
     commit(imported);
     setSelectedUid(imported.nodes[0]?.uid ?? "");
     setMode("edit");
     window.setTimeout(fitView, 60);
     setToast({
       tone: "warning",
-      message: `已导入 ${imported.nodes.length} 个国策。高级效果与图标不会进入这个轻量布局项目。`,
+      message: ui.importedFocuses(imported.nodes.length),
     });
   }
 
   function importPastedText() {
     try {
-      if (!/\bfocus_tree\s*=\s*\{/.test(focusImportDraft)) throw new Error("没有找到 focus_tree = { ... }");
-      applyImportedProject(focusImportDraft, parseLocalisation(localisationImportDraft));
+      if (!/\bfocus_tree\s*=\s*\{/.test(focusImportDraft)) throw new Error(ui.noFocusTree);
+      if (localisationImportDraft.trim() && !detectLocalisationLanguage(localisationImportDraft)) {
+        throw new Error(ui.missingLocalisationHeader);
+      }
+      const detectedLanguage = detectLocalisationLanguage(localisationImportDraft) ?? projectRef.current.localisationLanguage;
+      applyImportedProject(focusImportDraft, parseLocalisation(localisationImportDraft), detectedLanguage);
       setPasteImportOpen(false);
       setFocusImportDraft("");
       setLocalisationImportDraft("");
     } catch (error) {
-      setToast({ tone: "error", message: `导入失败：${error instanceof Error ? error.message : "文本格式无法识别"}` });
+      setToast({ tone: "error", message: ui.importFailed(error instanceof Error ? error.message : ui.unrecognizedText) });
     }
   }
 
@@ -1169,36 +1544,54 @@ export default function Home() {
     try {
       const texts = await Promise.all(files.map(async (file) => ({ name: file.name, text: await file.text() })));
       const focusFile = texts.find((item) => /\bfocus_tree\s*=\s*\{/.test(item.text));
-      const localisationFiles = texts.filter((item) => /^\uFEFF?\s*l_[A-Za-z_]+\s*:/m.test(item.text));
-      const localisationMap = new Map<string, string>();
-      localisationFiles.forEach((item) => {
-        parseLocalisation(item.text).forEach((value, key) => localisationMap.set(key, value));
+      const localisationCandidates = texts.filter((item) => /^\uFEFF?\s*l_[A-Za-z_]+\s*:/m.test(item.text));
+      const localisationFiles = texts.flatMap((item) => {
+        const language = detectLocalisationLanguage(item.text);
+        return language ? [{ ...item, language }] : [];
       });
+      if (localisationCandidates.length && !localisationFiles.length) {
+        throw new Error(ui.unsupportedLanguageCode);
+      }
+      const preferredLocalisation = localisationFiles.find(
+        (item) => item.language === projectRef.current.localisationLanguage,
+      ) ?? localisationFiles[0];
+      const localisationMap = preferredLocalisation
+        ? parseLocalisation(preferredLocalisation.text)
+        : new Map<string, string>();
 
       if (focusFile) {
-        applyImportedProject(focusFile.text, localisationMap);
-      } else if (localisationMap.size) {
+        applyImportedProject(
+          focusFile.text,
+          localisationMap,
+          preferredLocalisation?.language ?? projectRef.current.localisationLanguage,
+        );
+      } else if (preferredLocalisation && localisationMap.size) {
+        const currentProject = projectRef.current;
         const next = {
-          ...project,
-          nodes: project.nodes.map((node) => ({
+          ...currentProject,
+          localisationLanguage: preferredLocalisation.language,
+          nodes: currentProject.nodes.map((node) => ({
             ...node,
             name: localisationMap.get(node.id) ?? node.name,
             description: localisationMap.get(`${node.id}_desc`) ?? node.description,
           })),
         };
         commit(next);
-        setToast({ tone: "success", message: "本地化已按国策 ID 合并。" });
+        setToast({
+          tone: "success",
+          message: ui.localisationMerged(localisationLabel(preferredLocalisation.language, uiLanguage)),
+        });
       } else {
-        throw new Error("未识别到 focus_tree 或本地化内容");
+        throw new Error(ui.noRecognizedImport);
       }
     } catch (error) {
-      setToast({ tone: "error", message: `导入失败：${error instanceof Error ? error.message : "文件格式无法识别"}` });
+      setToast({ tone: "error", message: ui.importFailed(error instanceof Error ? error.message : ui.unrecognizedFile) });
     }
   }
 
   function guardExport(action: () => void) {
     if (validation.errors.length) {
-      setToast({ tone: "error", message: `请先处理 ${validation.errors.length} 个错误，再导出文件。` });
+      setToast({ tone: "error", message: ui.resolveErrorsBeforeExport(validation.errors.length) });
       return;
     }
     action();
@@ -1206,24 +1599,24 @@ export default function Home() {
 
   function exportFocus() {
     guardExport(() => {
-      downloadText(`${safeToken(project.treeId, "focus_tree")}.txt`, focusScript);
-      setToast({ tone: "success", message: "国策脚本 TXT 已生成。" });
+      downloadText(focusFilename, focusScript);
+      setToast({ tone: "success", message: ui.focusExported });
     });
   }
 
   function exportLocalisation() {
     guardExport(() => {
-      downloadText(`${safeToken(project.treeId, "focus_tree")}_l_simp_chinese.yml`, localisation, true);
-      setToast({ tone: "success", message: "简体中文本地化 YML 已生成（UTF-8 BOM）。" });
+      downloadText(localisationFilename, localisation, true);
+      setToast({ tone: "success", message: ui.localisationExported(activeLocalisationLabel) });
     });
   }
 
   async function copyAll() {
     try {
-      await navigator.clipboard.writeText(`# common/national_focus/${project.treeId}.txt\n\n${focusScript}\n# localisation/simp_chinese/${project.treeId}_l_simp_chinese.yml\n\n${localisation}`);
-      setToast({ tone: "success", message: "脚本与本地化已复制到剪贴板。" });
+      await navigator.clipboard.writeText(`# common/national_focus/${focusFilename}\n\n${focusScript}\n# localisation/${project.localisationLanguage}/${localisationFilename}\n\n${localisation}`);
+      setToast({ tone: "success", message: ui.copiedToClipboard });
     } catch {
-      setToast({ tone: "error", message: "浏览器未允许读取剪贴板，请使用下载按钮。" });
+      setToast({ tone: "error", message: ui.clipboardDenied });
     }
   }
 
@@ -1231,9 +1624,9 @@ export default function Home() {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
       setSaveState("saved");
-      setToast({ tone: "success", message: "草稿已保存在当前浏览器。" });
+      setToast({ tone: "success", message: ui.draftSaved });
     } catch {
-      setToast({ tone: "error", message: "浏览器无法保存草稿。" });
+      setToast({ tone: "error", message: ui.draftSaveFailed });
     }
   }
 
@@ -1274,48 +1667,53 @@ export default function Home() {
   const relativeY = selected ? selected.absY - (selectedAnchor?.absY ?? 0) : 0;
 
   return (
-    <main className="studio-shell">
+    <main className="studio-shell" lang={uiLanguage}>
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true"><Compass size={26} strokeWidth={1.5} /></span>
           <div>
-            <h1>国策树设计器</h1>
+            <h1>{ui.appTitle}</h1>
             <p>Focus Tree Cartography Studio</p>
           </div>
         </div>
 
-        <div className="mode-switch" role="tablist" aria-label="视图模式">
+        <div className="mode-switch" role="tablist" aria-label={ui.viewMode}>
           <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} role="tab" aria-selected={mode === "edit"}>
-            <MapIcon size={15} /> 画布
+            <MapIcon size={15} /> {ui.canvas}
           </button>
           <button className={mode === "code" ? "active" : ""} onClick={() => setMode("code")} role="tab" aria-selected={mode === "code"}>
-            <FileCode2 size={15} /> 代码预览
+            <FileCode2 size={15} /> {ui.codePreview}
           </button>
         </div>
 
         <div className="top-actions">
-          <span className="save-indicator"><span className={saveState === "saving" ? "saving-dot" : "saved-dot"} />{saveState === "saving" ? "保存中" : "已保存"}</span>
-          <button className="icon-button" onClick={undo} disabled={!past.length} aria-label="撤销" title="撤销 Ctrl+Z"><Undo2 size={17} /></button>
-          <button className="icon-button" onClick={redo} disabled={!future.length} aria-label="重做" title="重做 Ctrl+Y"><Redo2 size={17} /></button>
-          <button className="secondary-button" onClick={saveNow}><Save size={16} />保存</button>
-          <label className="secondary-button file-button"><Upload size={16} />导入<input type="file" accept=".txt,.yml,.yaml" multiple onChange={handleImport} /></label>
-          <button className="primary-button" onClick={addNode}><Plus size={17} />添加国策</button>
+          <div className="ui-language-switch" role="group" aria-label={ui.interfaceLanguage}>
+            <Languages size={14} aria-hidden="true" />
+            <button className={uiLanguage === "zh-CN" ? "active" : ""} onClick={() => setUiLanguage("zh-CN")} aria-pressed={uiLanguage === "zh-CN"} title={ui.chineseInterface}>中</button>
+            <button className={uiLanguage === "en" ? "active" : ""} onClick={() => setUiLanguage("en")} aria-pressed={uiLanguage === "en"} title={ui.englishInterface}>EN</button>
+          </div>
+          <span className="save-indicator"><span className={saveState === "saving" ? "saving-dot" : "saved-dot"} />{saveState === "saving" ? ui.saving : ui.saved}</span>
+          <button className="icon-button" onClick={undo} disabled={!past.length} aria-label={ui.undo} title={`${ui.undo} Ctrl+Z`}><Undo2 size={17} /></button>
+          <button className="icon-button" onClick={redo} disabled={!future.length} aria-label={ui.redo} title={`${ui.redo} Ctrl+Y`}><Redo2 size={17} /></button>
+          <button className="secondary-button" onClick={saveNow}><Save size={16} />{ui.save}</button>
+          <label className="secondary-button file-button"><Upload size={16} />{ui.import}<input type="file" accept=".txt,.yml,.yaml" multiple onChange={handleImport} /></label>
+          <button className="primary-button" onClick={addNode}><Plus size={17} />{ui.addFocus}</button>
         </div>
       </header>
 
       <section className="workspace">
-        <aside className="inspector panel-paper" aria-label="国策属性">
+        <aside className="inspector panel-paper" aria-label={ui.focusProperties}>
           <div className="panel-heading">
-            <div><span className="eyebrow">FOCUS</span><h2>国策属性</h2></div>
+            <div><span className="eyebrow">FOCUS</span><h2>{ui.focusProperties}</h2></div>
             <span className="folio">№ {String(project.nodes.findIndex((node) => node.uid === selectedUid) + 1).padStart(3, "0")}</span>
           </div>
 
           {selected ? (
             <div className="inspector-form">
-              <label>国策 ID<input value={selected.id} spellCheck={false} onChange={(event) => patchNode(selected.uid, { id: event.target.value })} /></label>
-              <label>本地化名称<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value })} /></label>
-              <label>本地化描述<textarea value={selected.description} rows={6} onChange={(event) => patchNode(selected.uid, { description: event.target.value })} /></label>
-              <label>完成天数<input type="number" min="1" step="1" value={selected.days} onChange={(event) => {
+              <label>{ui.focusId}<input value={selected.id} spellCheck={false} onChange={(event) => patchNode(selected.uid, { id: event.target.value })} /></label>
+              <label>{ui.localisationName} · {activeLocalisationLabel}<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value })} /></label>
+              <label>{ui.localisationDescription} · {activeLocalisationLabel}<textarea value={selected.description} rows={6} onChange={(event) => patchNode(selected.uid, { description: event.target.value })} /></label>
+              <label>{ui.completionDays}<input type="number" min="1" step="1" value={selected.days} onChange={(event) => {
                 const days = event.currentTarget.valueAsNumber;
                 if (Number.isFinite(days)) patchNode(selected.uid, { days: Math.max(1, Math.round(days)) });
               }} /></label>
@@ -1326,6 +1724,7 @@ export default function Home() {
                 nodes={project.nodes}
                 currentUid={selected.uid}
                 groups={selected.prerequisiteGroups}
+                ui={ui}
                 onChange={(groups) => patchNode(selected.uid, {
                   prerequisiteGroups: groups,
                   relativeToUid: selected.relativeToUid ?? groups.flat()[0] ?? null,
@@ -1336,33 +1735,34 @@ export default function Home() {
                 nodes={project.nodes}
                 currentUid={selected.uid}
                 values={selected.mutuallyExclusiveUids}
+                ui={ui}
                 onChange={(uids) => setMutuallyExclusive(selected.uid, uids)}
               />
 
-              <label>坐标相对于
+              <label>{ui.relativeTo}
                 <select value={selected.relativeToUid ?? ""} onChange={(event) => patchNode(selected.uid, { relativeToUid: event.target.value || null })}>
-                  <option value="">画布原点</option>
+                  <option value="">{ui.canvasOrigin}</option>
                   {project.nodes.filter((node) => node.uid !== selected.uid).map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
                 </select>
               </label>
 
               <div className="coordinate-card">
-                <div><span>相对 X</span><strong>{relativeX}</strong></div>
-                <div><span>相对 Y</span><strong>{relativeY}</strong></div>
-                <small><MousePointer2 size={13} />拖动节点即可修改坐标</small>
+                <div><span>{ui.relativeX}</span><strong>{relativeX}</strong></div>
+                <div><span>{ui.relativeY}</span><strong>{relativeY}</strong></div>
+                <small><MousePointer2 size={13} />{ui.dragToEditCoordinates}</small>
               </div>
 
               <div className="node-actions">
-                <button onClick={() => duplicateNode(selected.uid)}><Copy size={15} />复制</button>
-                <button className="danger" onClick={() => removeNode(selected.uid)}><Trash2 size={15} />删除</button>
+                <button onClick={() => duplicateNode(selected.uid)}><Copy size={15} />{ui.duplicate}</button>
+                <button className="danger" onClick={() => removeNode(selected.uid)}><Trash2 size={15} />{ui.delete}</button>
               </div>
             </div>
           ) : (
             <div className="empty-selection">
               <MousePointer2 size={28} />
-              <h3>选择一个国策</h3>
-              <p>点击画布节点以编辑 ID、名称、描述与关系。</p>
-              <button className="primary-button" onClick={addNode}><Plus size={16} />添加国策</button>
+              <h3>{ui.chooseFocus}</h3>
+              <p>{ui.chooseFocusHelp}</p>
+              <button className="primary-button" onClick={addNode}><Plus size={16} />{ui.addFocus}</button>
             </div>
           )}
         </aside>
@@ -1377,7 +1777,7 @@ export default function Home() {
               onPointerUp={handleCanvasPointerUp}
               onPointerCancel={handleCanvasPointerUp}
               onWheel={handleWheel}
-              aria-label="可拖拽国策树画布"
+              aria-label={ui.draggableCanvas}
             >
               <div className="coordinate-ruler ruler-top" aria-hidden="true"><span>-6</span><span>-4</span><span>-2</span><span>0</span><span>2</span><span>4</span><span>6</span></div>
               <div className="north-mark" aria-hidden="true">N<span>↑</span></div>
@@ -1426,42 +1826,42 @@ export default function Home() {
                       onPointerMove={handleNodePointerMove}
                       onPointerUp={handleNodePointerUp}
                       onPointerCancel={handleNodePointerUp}
-                      aria-label={`${node.name || node.id}，坐标 ${rx}, ${ry}`}
+                      aria-label={ui.focusCoordinate(node.name || node.id, rx, ry)}
                     >
                       <span className="card-art" aria-hidden="true" />
-                      <span className="card-copy"><strong>{node.name || "未命名国策"}</strong><small>{node.id || "missing_id"}</small></span>
-                      <span className="card-meta"><span><Focus size={12} />x {rx} · y {ry}</span><span>{node.days} 日</span></span>
+                      <span className="card-copy"><strong>{node.name || ui.unnamedFocus}</strong><small>{node.id || "missing_id"}</small></span>
+                      <span className="card-meta"><span><Focus size={12} />x {rx} · y {ry}</span><span>{ui.days(node.days)}</span></span>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="canvas-help"><MousePointer2 size={14} />拖动节点 · 方向键微调 · 滚轮缩放</div>
-              <div className="zoom-controls" aria-label="缩放控制" onPointerDown={(event) => event.stopPropagation()}>
-                <button onClick={() => zoomBy(0.88)} aria-label="缩小"><ZoomOut size={17} /></button>
+              <div className="canvas-help"><MousePointer2 size={14} />{ui.canvasHelp}</div>
+              <div className="zoom-controls" aria-label={ui.zoomControls} onPointerDown={(event) => event.stopPropagation()}>
+                <button onClick={() => zoomBy(0.88)} aria-label={ui.zoomOut}><ZoomOut size={17} /></button>
                 <span>{Math.round(view.zoom * 100)}%</span>
-                <button onClick={() => zoomBy(1.14)} aria-label="放大"><ZoomIn size={17} /></button>
-                <button onClick={fitView} aria-label="适应画布"><Maximize2 size={17} /></button>
+                <button onClick={() => zoomBy(1.14)} aria-label={ui.zoomIn}><ZoomIn size={17} /></button>
+                <button onClick={fitView} aria-label={ui.fitCanvas}><Maximize2 size={17} /></button>
               </div>
             </div>
           ) : (
             <div className="code-preview panel-paper">
               <div className="code-preview-head">
-                <div><span className="eyebrow">EXPORT PREVIEW</span><h2>游戏文件预览</h2></div>
-                <button className="secondary-button" onClick={copyAll}><Clipboard size={15} />复制全部</button>
+                <div><span className="eyebrow">EXPORT PREVIEW</span><h2>{ui.gameFilePreview}</h2></div>
+                <button className="secondary-button" onClick={copyAll}><Clipboard size={15} />{ui.copyAll}</button>
               </div>
               <div className="code-grid">
-                <article><header><FileText size={15} /><span>{project.treeId}.txt</span><button onClick={exportFocus}><Download size={14} />下载</button></header><pre>{focusScript}</pre></article>
-                <article><header><Languages size={15} /><span>{project.treeId}_l_simp_chinese.yml</span><button onClick={exportLocalisation}><Download size={14} />下载</button></header><pre>{localisation}</pre></article>
+                <article><header><FileText size={15} /><span>{focusFilename}</span><button onClick={exportFocus}><Download size={14} />{ui.download}</button></header><pre>{focusScript}</pre></article>
+                <article><header><Languages size={15} /><span>{localisationFilename}</span><button onClick={exportLocalisation}><Download size={14} />{ui.download}</button></header><pre>{localisation}</pre></article>
               </div>
             </div>
           )}
         </section>
 
-        <aside className="utility-rail" aria-label="导航与导出">
+        <aside className="utility-rail" aria-label={ui.navigationAndExport}>
           <section className="utility-card panel-paper minimap-card">
-            <div className="utility-heading"><div><span className="eyebrow">NAVIGATOR</span><h2>导航器</h2></div><LocateFixed size={18} /></div>
-            <button className="minimap" onClick={fitView} aria-label="点击适应全部国策">
+            <div className="utility-heading"><div><span className="eyebrow">NAVIGATOR</span><h2>{ui.navigator}</h2></div><LocateFixed size={18} /></div>
+            <button className="minimap" onClick={fitView} aria-label={ui.fitAllFocuses}>
               <svg viewBox={`${minimapBounds.x} ${minimapBounds.y} ${minimapBounds.width} ${minimapBounds.height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                 {prerequisiteEdges.map(({ parentUid, childUid, isOr }) => {
                   const parent = nodeByUid.get(parentUid);
@@ -1477,46 +1877,55 @@ export default function Home() {
                 })}
                 {project.nodes.map((node) => <rect key={node.uid} className={node.uid === selectedUid ? "active" : ""} x={worldX(node.absX)} y={worldY(node.absY)} width={NODE_W} height={NODE_H} rx="12" />)}
               </svg>
-              <span>全局布局图 · 点击适应全部节点</span>
+              <span>{ui.globalLayout}</span>
             </button>
           </section>
 
           <section className="utility-card panel-paper project-card">
-            <div className="utility-heading"><div><span className="eyebrow">PROJECT</span><h2>项目设置</h2></div><Settings2 size={18} /></div>
-            <label>国策树 ID<input value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value })} /></label>
-            <label>国家 TAG<input value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() })} /></label>
+            <div className="utility-heading"><div><span className="eyebrow">PROJECT</span><h2>{ui.projectSettings}</h2></div><Settings2 size={18} /></div>
+            <label>{ui.treeId}<input value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value })} /></label>
+            <label>{ui.countryTag}<input value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() })} /></label>
+            <label>{ui.localisationLanguage}
+              <select
+                value={project.localisationLanguage}
+                onChange={(event) => patchProject({ localisationLanguage: event.target.value as LocalisationLanguage })}
+              >
+                {LOCALISATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.labels[uiLanguage]}</option>)}
+              </select>
+            </label>
+            <p className="language-note">{ui.localisationLanguageNote}</p>
           </section>
 
           <section className="utility-card panel-paper export-card">
-            <div className="utility-heading"><div><span className="eyebrow">EXPORT</span><h2>导出文件</h2></div><Download size={18} /></div>
-            <button className="export-button primary" onClick={exportFocus}><FileText size={18} /><span><strong>国策脚本</strong><small>common/national_focus · .txt</small></span><Download size={16} /></button>
-            <button className="export-button" onClick={exportLocalisation}><Languages size={18} /><span><strong>中文本地化</strong><small>localisation/simp_chinese · .yml</small></span><Download size={16} /></button>
-            <button className="copy-all" onClick={copyAll}><Clipboard size={15} />复制两份文件内容</button>
-            <button className="copy-all" onClick={() => setPasteImportOpen(true)}><Upload size={15} />粘贴 TXT / YML 内容</button>
-            <p className="import-note"><AlertTriangle size={12} />导入仅解析布局、前置、互斥与本地化；高级效果和注释不会被覆盖保存。</p>
+            <div className="utility-heading"><div><span className="eyebrow">EXPORT</span><h2>{ui.exportFiles}</h2></div><Download size={18} /></div>
+            <button className="export-button primary" onClick={exportFocus}><FileText size={18} /><span><strong>{ui.focusScript}</strong><small>common/national_focus · .txt</small></span><Download size={16} /></button>
+            <button className="export-button" onClick={exportLocalisation}><Languages size={18} /><span><strong>{ui.localisationExport(activeLocalisationLabel)}</strong><small>localisation/{project.localisationLanguage} · .yml</small></span><Download size={16} /></button>
+            <button className="copy-all" onClick={copyAll}><Clipboard size={15} />{ui.copyTwoFiles}</button>
+            <button className="copy-all" onClick={() => setPasteImportOpen(true)}><Upload size={15} />{ui.pasteFiles}</button>
+            <p className="import-note"><AlertTriangle size={12} />{ui.importNote}</p>
           </section>
 
           <section className={`validation-card ${validation.errors.length ? "has-errors" : validation.warnings.length ? "has-warnings" : ""}`}>
             {validation.errors.length || validation.warnings.length ? <AlertTriangle size={19} /> : <CheckCircle2 size={19} />}
-            <div><strong>{validation.errors.length ? `${validation.errors.length} 个错误` : validation.warnings.length ? `${validation.warnings.length} 个提醒` : "可以导出"}</strong><span>{validation.errors[0] ?? validation.warnings[0] ?? `${project.nodes.length} 个国策 · ${prerequisiteEdges.length} 条前置 · ${mutualPairs.length} 条互斥`}</span></div>
+            <div><strong>{validation.errors.length ? ui.errorCount(validation.errors.length) : validation.warnings.length ? ui.warningCount(validation.warnings.length) : ui.readyToExport}</strong><span>{validation.errors[0] ?? validation.warnings[0] ?? ui.projectSummary(project.nodes.length, prerequisiteEdges.length, mutualPairs.length)}</span></div>
           </section>
         </aside>
       </section>
 
       <footer className="statusbar">
-        <span><Link2 size={13} />{prerequisiteEdges.length} 条前置关系</span>
-        <span><Ban size={13} />{mutualPairs.length} 条互斥关系</span>
-        <span><MousePointer2 size={13} />网格吸附：开启</span>
+        <span><Link2 size={13} />{ui.prerequisiteRelations(prerequisiteEdges.length)}</span>
+        <span><Ban size={13} />{ui.mutualRelations(mutualPairs.length)}</span>
+        <span><MousePointer2 size={13} />{ui.gridSnapOn}</span>
         <span className="status-spacer" />
-        <span>{selected ? `选中：${selected.id}` : "未选择节点"}</span>
-        <span>{project.nodes.length} 个国策</span>
+        <span>{selected ? ui.selectedFocus(selected.id) : ui.noSelectedFocus}</span>
+        <span>{ui.focusCount(project.nodes.length)}</span>
       </footer>
 
       {toast && (
         <div className={`toast ${toast.tone}`} role="status">
           {toast.tone === "success" ? <Check size={17} /> : <AlertTriangle size={17} />}
           <span>{toast.message}</span>
-          <button onClick={() => setToast(null)} aria-label="关闭提示"><Minus size={14} /></button>
+          <button onClick={() => setToast(null)} aria-label={ui.closeToast}><Minus size={14} /></button>
         </div>
       )}
 
@@ -1526,17 +1935,17 @@ export default function Home() {
         }}>
           <section className="import-modal panel-paper" role="dialog" aria-modal="true" aria-labelledby="paste-import-title">
             <div className="import-modal-head">
-              <div><span className="eyebrow">TEXT IMPORT</span><h2 id="paste-import-title">粘贴文本导入</h2></div>
-              <button onClick={() => setPasteImportOpen(false)} aria-label="关闭粘贴导入"><Minus size={16} /></button>
+              <div><span className="eyebrow">TEXT IMPORT</span><h2 id="paste-import-title">{ui.textImport}</h2></div>
+              <button onClick={() => setPasteImportOpen(false)} aria-label={ui.closeTextImport}><Minus size={16} /></button>
             </div>
             <div className="import-modal-grid">
-              <label>国策树脚本（.txt）<textarea value={focusImportDraft} onChange={(event) => setFocusImportDraft(event.target.value)} placeholder="focus_tree = { ... }" spellCheck={false} /></label>
-              <label>简体中文本地化（可选）<textarea value={localisationImportDraft} onChange={(event) => setLocalisationImportDraft(event.target.value)} placeholder={'l_simp_chinese:\n TAG_focus:0 "国策名称"'} spellCheck={false} /></label>
+              <label>{ui.focusTreeScriptFile}<textarea value={focusImportDraft} onChange={(event) => setFocusImportDraft(event.target.value)} placeholder="focus_tree = { ... }" spellCheck={false} /></label>
+              <label>{ui.optionalLocalisation(activeLocalisationLabel)}<textarea value={localisationImportDraft} onChange={(event) => setLocalisationImportDraft(event.target.value)} placeholder={`l_${project.localisationLanguage}:\n TAG_focus:0 "${ui.focusNamePlaceholder}"`} spellCheck={false} /></label>
             </div>
-            <p className="modal-warning"><AlertTriangle size={14} />导入会替换当前画布；不支持的效果、图标与注释不会保留，请先保存原文件。</p>
+            <p className="modal-warning"><AlertTriangle size={14} />{ui.importModalWarning}</p>
             <div className="modal-actions">
-              <button className="modal-cancel" onClick={() => setPasteImportOpen(false)}>取消</button>
-              <button className="primary-button" onClick={importPastedText}><Upload size={15} />解析并导入</button>
+              <button className="modal-cancel" onClick={() => setPasteImportOpen(false)}>{ui.cancel}</button>
+              <button className="primary-button" onClick={importPastedText}><Upload size={15} />{ui.parseAndImport}</button>
             </div>
           </section>
         </div>
