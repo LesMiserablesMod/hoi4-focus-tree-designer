@@ -12,6 +12,7 @@ import {
   FileCode2,
   FileText,
   Focus,
+  Github,
   Languages,
   Link2,
   LocateFixed,
@@ -30,6 +31,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import Image from "next/image";
 import {
   ChangeEvent,
   PointerEvent as ReactPointerEvent,
@@ -101,6 +103,8 @@ const UI_MESSAGES = {
   "zh-CN": {
     pageTitle: "HOI4 国策树设计器",
     appTitle: "国策树设计器",
+    organizationGithub: "访问 Les Misérables Mod 组织 GitHub 首页",
+    projectGithub: "查看本项目的 GitHub 仓库",
     interfaceLanguage: "界面语言",
     chineseInterface: "中文界面",
     englishInterface: "English interface",
@@ -243,6 +247,8 @@ const UI_MESSAGES = {
   en: {
     pageTitle: "HOI4 Focus Tree Designer",
     appTitle: "Focus Tree Designer",
+    organizationGithub: "Visit the Les Misérables Mod organization on GitHub",
+    projectGithub: "View this project on GitHub",
     interfaceLanguage: "Interface language",
     chineseInterface: "Chinese interface",
     englishInterface: "English interface",
@@ -1675,6 +1681,22 @@ export default function Home() {
             <h1>{ui.appTitle}</h1>
             <p>Focus Tree Cartography Studio</p>
           </div>
+          <a
+            className="organization-link"
+            href="https://github.com/LesMiserablesMod"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={ui.organizationGithub}
+            title={ui.organizationGithub}
+          >
+            <Image
+              src="/hoi4-focus-tree-designer/lm-mod-logo.png"
+              alt=""
+              width={2000}
+              height={768}
+              priority
+            />
+          </a>
         </div>
 
         <div className="mode-switch" role="tablist" aria-label={ui.viewMode}>
@@ -1687,6 +1709,14 @@ export default function Home() {
         </div>
 
         <div className="top-actions">
+          <a
+            className="icon-button github-link"
+            href="https://github.com/LesMiserablesMod/hoi4-focus-tree-designer"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={ui.projectGithub}
+            title={ui.projectGithub}
+          ><Github size={18} /></a>
           <div className="ui-language-switch" role="group" aria-label={ui.interfaceLanguage}>
             <Languages size={14} aria-hidden="true" />
             <button className={uiLanguage === "zh-CN" ? "active" : ""} onClick={() => setUiLanguage("zh-CN")} aria-pressed={uiLanguage === "zh-CN"} title={ui.chineseInterface}>中</button>

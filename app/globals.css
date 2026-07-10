@@ -49,6 +49,8 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
+nav a:focus-visible,
+.topbar a:focus-visible,
 label.file-button:focus-within {
   outline: 2px solid #c68061;
   outline-offset: 2px;
@@ -136,6 +138,29 @@ label.file-button:focus-within {
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.organization-link {
+  display: flex;
+  width: 132px;
+  height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-left: 12px;
+  border-left: 1px solid rgba(216, 189, 131, 0.28);
+  border-radius: 2px;
+  transition: filter 140ms ease, opacity 140ms ease;
+}
+
+.organization-link img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.organization-link:hover {
+  filter: brightness(1.14);
 }
 
 .mode-switch {
@@ -256,6 +281,11 @@ label.file-button:focus-within {
   border: 1px solid rgba(212, 190, 145, 0.24);
 }
 
+.github-link {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
 .secondary-button {
   padding: 0 11px;
   background: rgba(255, 255, 255, 0.04);
@@ -271,6 +301,7 @@ label.file-button:focus-within {
 }
 
 .topbar button:hover:not(:disabled),
+.topbar a.icon-button:hover,
 .topbar label.file-button:hover,
 .primary-button:hover {
   transform: translateY(-1px);
@@ -1533,6 +1564,10 @@ button:disabled {
     display: none;
   }
 
+  .organization-link {
+    display: none;
+  }
+
   .workspace {
     grid-template-columns: 255px minmax(400px, 1fr) 225px;
   }
@@ -1555,6 +1590,7 @@ button:disabled {
 
   .brand-lockup p { display: none; }
   .top-actions .icon-button { display: none; }
+  .top-actions .github-link { display: flex; }
 
   .workspace {
     grid-template-columns: 238px minmax(360px, 1fr);
