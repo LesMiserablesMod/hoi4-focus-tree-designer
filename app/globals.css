@@ -142,11 +142,12 @@ label.file-button:focus-within {
 
 .organization-link {
   display: flex;
-  width: 132px;
-  height: 44px;
+  width: 190px;
+  height: 48px;
   flex: 0 0 auto;
   align-items: center;
-  padding-left: 12px;
+  padding-left: 10px;
+  overflow: hidden;
   border-left: 1px solid rgba(216, 189, 131, 0.28);
   border-radius: 2px;
   transition: filter 140ms ease, opacity 140ms ease;
@@ -157,6 +158,7 @@ label.file-button:focus-within {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transform: scale(1.5);
 }
 
 .organization-link:hover {
@@ -208,6 +210,37 @@ label.file-button:focus-within {
   background: rgba(4, 18, 29, 0.42);
   border: 1px solid rgba(212, 190, 145, 0.3);
   border-radius: 4px;
+}
+
+.theme-switch {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px;
+  color: rgba(244, 233, 211, 0.62);
+  background: rgba(4, 18, 29, 0.42);
+  border: 1px solid rgba(212, 190, 145, 0.3);
+  border-radius: 4px;
+}
+
+.theme-switch button {
+  display: grid;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  padding: 0;
+  color: rgba(244, 233, 211, 0.62);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+}
+
+.theme-switch button.active {
+  color: #fff8e9;
+  background: #194566;
+  box-shadow: inset 0 0 0 1px rgba(226, 200, 147, 0.26);
 }
 
 .ui-language-switch > svg {
@@ -1547,6 +1580,227 @@ button:disabled {
   border-radius: 4px;
   font-size: 11px;
   font-weight: 650;
+}
+
+html[data-theme="dark"] {
+  --paper: #182129;
+  --paper-light: #202b34;
+  --paper-pale: #26343e;
+  --paper-shadow: #10171d;
+  --ink: #e8dfcf;
+  --muted: #aaa596;
+  --rule: #47545d;
+  --grid-red: rgba(190, 103, 99, 0.13);
+  --brass: #b49461;
+  --wine: #a84b5a;
+  --wine-dark: #7e3340;
+  --success: #78a58d;
+  --danger: #d26976;
+}
+
+html[data-theme="dark"] body,
+html[data-theme="dark"] .studio-shell,
+html[data-theme="dark"] .canvas-column,
+html[data-theme="dark"] .focus-canvas {
+  background-color: var(--paper);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .panel-paper {
+  background-color: var(--paper-light);
+  background-image:
+    radial-gradient(circle at 12% 17%, rgba(205, 174, 121, 0.035), transparent 19%),
+    radial-gradient(circle at 83% 66%, rgba(205, 174, 121, 0.025), transparent 23%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0, rgba(255, 255, 255, 0.012) 1px, transparent 1px, transparent 4px);
+}
+
+html[data-theme="dark"] .inspector,
+html[data-theme="dark"] .utility-rail {
+  border-color: #3f4b54;
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .utility-rail {
+  background: #1a242c;
+}
+
+html[data-theme="dark"] .panel-heading h2,
+html[data-theme="dark"] .utility-heading h2,
+html[data-theme="dark"] .code-preview h2,
+html[data-theme="dark"] .import-modal-head h2,
+html[data-theme="dark"] .empty-selection h3,
+html[data-theme="dark"] .card-copy strong {
+  color: #f0e7d8;
+}
+
+html[data-theme="dark"] .inspector-form label,
+html[data-theme="dark"] .project-card label,
+html[data-theme="dark"] .relation-editor-head strong,
+html[data-theme="dark"] .relation-group-top,
+html[data-theme="dark"] .import-modal-grid label {
+  color: #d4ccbd;
+}
+
+html[data-theme="dark"] .folio,
+html[data-theme="dark"] .relation-editor-head span,
+html[data-theme="dark"] .relation-help,
+html[data-theme="dark"] .language-note,
+html[data-theme="dark"] .import-note,
+html[data-theme="dark"] .minimap span,
+html[data-theme="dark"] .validation-card span,
+html[data-theme="dark"] .card-copy small,
+html[data-theme="dark"] .card-meta,
+html[data-theme="dark"] .empty-selection {
+  color: #aaa596;
+}
+
+html[data-theme="dark"] .inspector-form input,
+html[data-theme="dark"] .inspector-form textarea,
+html[data-theme="dark"] .inspector-form select,
+html[data-theme="dark"] .project-card input,
+html[data-theme="dark"] .project-card select,
+html[data-theme="dark"] .import-modal-grid textarea,
+html[data-theme="dark"] .relation-add-select,
+html[data-theme="dark"] .inspector-form .relation-add-select {
+  color: #eee6d8;
+  background-color: #26333d;
+  border-color: #52616c;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] .relation-editor-head > button,
+html[data-theme="dark"] .relation-empty,
+html[data-theme="dark"] .inline-empty,
+html[data-theme="dark"] .relation-group-card,
+html[data-theme="dark"] .node-actions button,
+html[data-theme="dark"] .copy-all,
+html[data-theme="dark"] .export-button,
+html[data-theme="dark"] .import-modal-head > button,
+html[data-theme="dark"] .modal-cancel,
+html[data-theme="dark"] .code-preview-head .secondary-button {
+  color: #ddd4c5;
+  background: #26333d;
+  border-color: #52616c;
+}
+
+html[data-theme="dark"] .relation-group-top,
+html[data-theme="dark"] .coordinate-card small {
+  background: #303e48;
+  border-color: #53616a;
+}
+
+html[data-theme="dark"] .relation-chip {
+  color: #d8e5e7;
+  background: #31434b;
+  border-color: #5d747b;
+}
+
+html[data-theme="dark"] .relation-chip.mutual {
+  color: #f1c7cd;
+  background: #4a3038;
+  border-color: #80505a;
+}
+
+html[data-theme="dark"] .coordinate-card {
+  background: #4b5962;
+  border-color: #4b5962;
+}
+
+html[data-theme="dark"] .coordinate-card > div {
+  background: #27343d;
+}
+
+html[data-theme="dark"] .focus-canvas {
+  background-image:
+    linear-gradient(var(--grid-red) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-red) 1px, transparent 1px),
+    linear-gradient(rgba(154, 174, 188, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(154, 174, 188, 0.055) 1px, transparent 1px),
+    radial-gradient(ellipse at 70% 18%, rgba(180, 144, 89, 0.05), transparent 35%);
+}
+
+html[data-theme="dark"] .focus-card {
+  color: #e6dfd3;
+  background: #27343d;
+  border-color: #74808a;
+  box-shadow:
+    0 7px 14px rgba(0, 0, 0, 0.34),
+    inset 0 0 0 3px rgba(43, 56, 66, 0.8),
+    inset 0 0 0 4px rgba(157, 137, 103, 0.42);
+}
+
+html[data-theme="dark"] .focus-card:hover {
+  box-shadow: 0 9px 17px rgba(0, 0, 0, 0.42), inset 0 0 0 3px rgba(51, 66, 77, 0.85), inset 0 0 0 4px rgba(169, 147, 108, 0.5);
+}
+
+html[data-theme="dark"] .focus-card.selected {
+  border-color: #c86573;
+  box-shadow: 0 9px 18px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(200, 101, 115, 0.3), inset 0 0 0 3px #30404b, inset 0 0 0 5px var(--wine);
+}
+
+html[data-theme="dark"] .focus-card.selected .card-copy strong {
+  color: #ffd9dd;
+}
+
+html[data-theme="dark"] .connector { stroke: #6d9fbe; }
+html[data-theme="dark"] #arrow-ink path { fill: #6d9fbe; }
+
+html[data-theme="dark"] .canvas-help,
+html[data-theme="dark"] .zoom-controls {
+  color: #d6cdbd;
+  background: rgba(31, 42, 51, 0.92);
+  border-color: #53616b;
+}
+
+html[data-theme="dark"] .zoom-controls button,
+html[data-theme="dark"] .zoom-controls span {
+  border-color: #53616b;
+}
+
+html[data-theme="dark"] .utility-card {
+  border-color: #4d5a64;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.025);
+}
+
+html[data-theme="dark"] .minimap {
+  background:
+    linear-gradient(rgba(190, 103, 99, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(190, 103, 99, 0.09) 1px, transparent 1px),
+    #26343d;
+  border-color: #5a6871;
+}
+
+html[data-theme="dark"] .minimap rect { fill: #3a4851; stroke: #8e7c60; }
+html[data-theme="dark"] .minimap rect.active { fill: #6b4149; stroke: #d07480; }
+
+html[data-theme="dark"] .export-button.primary {
+  color: #f8edda;
+  background: #173e59;
+  border-color: #35617c;
+}
+
+html[data-theme="dark"] .validation-card {
+  color: #9dc9b0;
+  background: rgba(45, 78, 63, 0.48);
+  border-color: rgba(121, 166, 141, 0.45);
+}
+
+html[data-theme="dark"] .validation-card.has-errors {
+  color: #eca7b0;
+  background: rgba(96, 43, 52, 0.55);
+  border-color: rgba(210, 105, 118, 0.48);
+}
+
+html[data-theme="dark"] .validation-card.has-warnings,
+html[data-theme="dark"] .modal-warning {
+  color: #e2c28d;
+  background: rgba(105, 79, 42, 0.5);
+  border-color: rgba(210, 171, 105, 0.4);
+}
+
+html[data-theme="dark"] .import-modal {
+  border-color: #62707a;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 3px rgba(255, 255, 255, 0.025);
 }
 
 @keyframes toast-in {

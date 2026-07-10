@@ -19,11 +19,14 @@ import {
   Map as MapIcon,
   Maximize2,
   Minus,
+  Monitor,
+  Moon,
   MousePointer2,
   Plus,
   Redo2,
   Save,
   Settings2,
+  Sun,
   Trash2,
   Undo2,
   Upload,
@@ -57,9 +60,11 @@ type FocusNode = {
 };
 
 type UiLanguage = "zh-CN" | "en";
+type ThemeMode = "light" | "dark" | "system";
 
 const DEFAULT_UI_LANGUAGE: UiLanguage = "zh-CN";
 const UI_LANGUAGE_STORAGE_KEY = "hoi4-focus-tree-ui-language";
+const THEME_STORAGE_KEY = "hoi4-focus-tree-theme";
 
 const LOCALISATION_LANGUAGES = [
   { code: "english", labels: { "zh-CN": "英语（English）", en: "English" } },
@@ -86,6 +91,10 @@ function isUiLanguage(value: unknown): value is UiLanguage {
   return value === "zh-CN" || value === "en";
 }
 
+function isThemeMode(value: unknown): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "system";
+}
+
 function localisationSettings(language: LocalisationLanguage) {
   return LOCALISATION_LANGUAGES.find((item) => item.code === language) ?? LOCALISATION_LANGUAGES[0];
 }
@@ -105,6 +114,10 @@ const UI_MESSAGES = {
     appTitle: "国策树设计器",
     organizationGithub: "访问 Les Misérables Mod 组织 GitHub 首页",
     projectGithub: "查看本项目的 GitHub 仓库",
+    themeMode: "显示主题",
+    lightTheme: "日间模式",
+    darkTheme: "夜间模式",
+    systemTheme: "跟随系统",
     interfaceLanguage: "界面语言",
     chineseInterface: "中文界面",
     englishInterface: "English interface",
@@ -249,6 +262,10 @@ const UI_MESSAGES = {
     appTitle: "Focus Tree Designer",
     organizationGithub: "Visit the Les Misérables Mod organization on GitHub",
     projectGithub: "View this project on GitHub",
+    themeMode: "Color theme",
+    lightTheme: "Light theme",
+    darkTheme: "Dark theme",
+    systemTheme: "Follow system",
     interfaceLanguage: "Interface language",
     chineseInterface: "Chinese interface",
     englishInterface: "English interface",
@@ -1077,6 +1094,7 @@ function MutualEditor({ nodes, currentUid, values, ui, onChange }: MutualEditorP
 
 export default function Home() {
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(DEFAULT_UI_LANGUAGE);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [project, setProject] = useState<ProjectState>(initialProject);
   const [selectedUid, setSelectedUid] = useState(initialProject.nodes[1].uid);
   const [past, setPast] = useState<ProjectState[]>([]);
@@ -1167,6 +1185,8 @@ export default function Home() {
       try {
         const savedUiLanguage = window.localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
         if (isUiLanguage(savedUiLanguage)) setUiLanguage(savedUiLanguage);
+        const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+        if (isThemeMode(savedTheme)) setThemeMode(savedTheme);
         const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
         if (saved) {
           const parsed = normalizeProject(JSON.parse(saved));
@@ -1183,6 +1203,24 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const resolvedTheme = themeMode === "system" ? (media.matches ? "dark" : "light") : themeMode;
+      document.documentElement.dataset.theme = resolvedTheme;
+      document.documentElement.style.colorScheme = resolvedTheme;
+    };
+    applyTheme();
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch {
+      // Theme switching still works when storage is unavailable.
+    }
+    if (themeMode === "system") media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [ready, themeMode]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1717,6 +1755,11 @@ export default function Home() {
             aria-label={ui.projectGithub}
             title={ui.projectGithub}
           ><Github size={18} /></a>
+          <div className="theme-switch" role="group" aria-label={ui.themeMode}>
+            <button className={themeMode === "light" ? "active" : ""} onClick={() => setThemeMode("light")} aria-pressed={themeMode === "light"} aria-label={ui.lightTheme} title={ui.lightTheme}><Sun size={14} /></button>
+            <button className={themeMode === "dark" ? "active" : ""} onClick={() => setThemeMode("dark")} aria-pressed={themeMode === "dark"} aria-label={ui.darkTheme} title={ui.darkTheme}><Moon size={14} /></button>
+            <button className={themeMode === "system" ? "active" : ""} onClick={() => setThemeMode("system")} aria-pressed={themeMode === "system"} aria-label={ui.systemTheme} title={ui.systemTheme}><Monitor size={14} /></button>
+          </div>
           <div className="ui-language-switch" role="group" aria-label={ui.interfaceLanguage}>
             <Languages size={14} aria-hidden="true" />
             <button className={uiLanguage === "zh-CN" ? "active" : ""} onClick={() => setUiLanguage("zh-CN")} aria-pressed={uiLanguage === "zh-CN"} title={ui.chineseInterface}>中</button>
