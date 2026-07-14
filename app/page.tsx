@@ -170,7 +170,7 @@ const UI_MESSAGES = {
     focusCoordinate: (name: string, x: number, y: number) => `${name}，坐标 ${x}, ${y}`,
     unnamedFocus: "未命名国策",
     days: (value: number) => `${value} 日`,
-    canvasHelp: "拖动节点 · 方向键微调 · 滚轮缩放",
+    canvasHelp: "左键拖动节点 · 右键框选 · 方向键微调 · 滚轮缩放",
     zoomControls: "缩放控制",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -201,6 +201,7 @@ const UI_MESSAGES = {
     mutualRelations: (count: number) => `${count} 条互斥关系`,
     gridSnapOn: "网格吸附：开启",
     selectedFocus: (id: string) => `选中：${id}`,
+    selectedFocusCount: (count: number) => `已选 ${count} 个节点 · 拖动任一节点可整组移动`,
     noSelectedFocus: "未选择节点",
     focusCount: (count: number) => `${count} 个国策`,
     closeToast: "关闭提示",
@@ -318,7 +319,7 @@ const UI_MESSAGES = {
     focusCoordinate: (name: string, x: number, y: number) => `${name}, coordinates ${x}, ${y}`,
     unnamedFocus: "Unnamed Focus",
     days: (value: number) => `${value} days`,
-    canvasHelp: "Drag nodes · Arrow keys to nudge · Wheel to zoom",
+    canvasHelp: "Left-drag nodes · Right-drag to box-select · Arrow keys to nudge · Wheel to zoom",
     zoomControls: "Zoom controls",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -349,6 +350,7 @@ const UI_MESSAGES = {
     mutualRelations: (count: number) => `${count} mutual ${count === 1 ? "link" : "links"}`,
     gridSnapOn: "Grid snap: On",
     selectedFocus: (id: string) => `Selected: ${id}`,
+    selectedFocusCount: (count: number) => `${count} nodes selected · Drag any selected node to move the group`,
     noSelectedFocus: "No node selected",
     focusCount: (count: number) => `${count} ${count === 1 ? "focus" : "focuses"}`,
     closeToast: "Dismiss notification",
@@ -442,7 +444,7 @@ const initialProject: ProjectState = {
       description: "Rebuild the institutions of state and lay a stable foundation for the nation's future.",
       days: 70,
       absX: 0,
-      absY: 0,
+      absY: 1,
       prerequisiteGroups: [],
       mutuallyExclusiveUids: [],
       relativeToUid: null,
@@ -455,7 +457,7 @@ const initialProject: ProjectState = {
       description: "Restore the industrial base and unlock new productive capacity.",
       days: 70,
       absX: -2,
-      absY: 2,
+      absY: 3,
       prerequisiteGroups: [["root-rebuild"]],
       mutuallyExclusiveUids: [],
       relativeToUid: "root-rebuild",
@@ -468,7 +470,7 @@ const initialProject: ProjectState = {
       description: "Reorganize the armed forces and prepare the army for modernization.",
       days: 70,
       absX: 2,
-      absY: 2,
+      absY: 3,
       prerequisiteGroups: [["root-rebuild"]],
       mutuallyExclusiveUids: [],
       relativeToUid: "root-rebuild",
@@ -481,7 +483,7 @@ const initialProject: ProjectState = {
       description: "Unite universities and industrial laboratories to accelerate technological progress.",
       days: 70,
       absX: -2,
-      absY: 4,
+      absY: 5,
       prerequisiteGroups: [["industrial-recovery"]],
       mutuallyExclusiveUids: [],
       relativeToUid: "industrial-recovery",
@@ -494,7 +496,7 @@ const initialProject: ProjectState = {
       description: "Fortify the border and key strategic positions to establish a defense in depth.",
       days: 70,
       absX: 2,
-      absY: 4,
+      absY: 5,
       prerequisiteGroups: [["army-reform"]],
       mutuallyExclusiveUids: [],
       relativeToUid: "army-reform",
@@ -1097,6 +1099,8 @@ export default function Home() {
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [project, setProject] = useState<ProjectState>(initialProject);
   const [selectedUid, setSelectedUid] = useState(initialProject.nodes[1].uid);
+  const [selectedUids, setSelectedUids] = useState<string[]>([initialProject.nodes[1].uid]);
+  const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [past, setPast] = useState<ProjectState[]>([]);
   const [future, setFuture] = useState<ProjectState[]>([]);
   const [view, setView] = useState<ViewState>({ x: -290, y: 18, zoom: 0.82 });
@@ -1110,12 +1114,10 @@ export default function Home() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const projectRef = useRef(project);
   const dragRef = useRef<{
-    uid: string;
     pointerId: number;
     startClientX: number;
     startClientY: number;
-    startAbsX: number;
-    startAbsY: number;
+    startPositions: Map<string, { x: number; y: number }>;
     before: ProjectState;
     moved: boolean;
   } | null>(null);
@@ -1126,9 +1128,17 @@ export default function Home() {
     startX: number;
     startY: number;
   } | null>(null);
+  const marqueeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
 
   const ui = UI_MESSAGES[uiLanguage];
   const selected = project.nodes.find((node) => node.uid === selectedUid) ?? null;
+  const selectedUidSet = useMemo(() => new Set(selectedUids), [selectedUids]);
   const activeLocalisationLabel = localisationLabel(project.localisationLanguage, uiLanguage);
   const safeTreeId = safeToken(project.treeId, "focus_tree");
   const focusFilename = `${safeTreeId}.txt`;
@@ -1193,6 +1203,7 @@ export default function Home() {
           if (parsed) {
             setProject(parsed);
             setSelectedUid(parsed.nodes[0].uid);
+            setSelectedUids([parsed.nodes[0].uid]);
           }
         }
       } catch {
@@ -1319,7 +1330,17 @@ export default function Home() {
       const previous = items[items.length - 1];
       setFuture((next) => [cloneProject(projectRef.current), ...next].slice(0, 60));
       setProject(previous);
-      if (!previous.nodes.some((node) => node.uid === selectedUid)) setSelectedUid(previous.nodes[0]?.uid ?? "");
+      const validUids = new Set(previous.nodes.map((node) => node.uid));
+      if (!validUids.has(selectedUid)) {
+        const fallbackUid = previous.nodes[0]?.uid ?? "";
+        setSelectedUid(fallbackUid);
+        setSelectedUids(fallbackUid ? [fallbackUid] : []);
+      } else {
+        setSelectedUids((current) => {
+          const validSelection = current.filter((uid) => validUids.has(uid));
+          return validSelection.length ? validSelection : [selectedUid];
+        });
+      }
       return items.slice(0, -1);
     });
   }
@@ -1330,7 +1351,17 @@ export default function Home() {
       const next = items[0];
       setPast((previous) => [...previous.slice(-59), cloneProject(projectRef.current)]);
       setProject(next);
-      if (!next.nodes.some((node) => node.uid === selectedUid)) setSelectedUid(next.nodes[0]?.uid ?? "");
+      const validUids = new Set(next.nodes.map((node) => node.uid));
+      if (!validUids.has(selectedUid)) {
+        const fallbackUid = next.nodes[0]?.uid ?? "";
+        setSelectedUid(fallbackUid);
+        setSelectedUids(fallbackUid ? [fallbackUid] : []);
+      } else {
+        setSelectedUids((current) => {
+          const validSelection = current.filter((uid) => validUids.has(uid));
+          return validSelection.length ? validSelection : [selectedUid];
+        });
+      }
       return items.slice(1);
     });
   }
@@ -1342,7 +1373,7 @@ export default function Home() {
     while (project.nodes.some((node) => node.uid === `focus-${uidIndex}`)) uidIndex += 1;
     const occupied = new Set(project.nodes.map((node) => `${node.absX},${node.absY}`));
     const baseX = anchor?.absX ?? 0;
-    const baseY = (anchor?.absY ?? -2) + 2;
+    const baseY = Math.max(1, (anchor?.absY ?? -1) + 2);
     const offsets = [0, 2, -2, 1, -1, 3, -3, 4, -4];
     let position = { x: baseX, y: baseY };
     outer: for (let row = 0; row < 20; row += 1) {
@@ -1369,6 +1400,7 @@ export default function Home() {
     };
     commit({ ...project, nodes: [...project.nodes, node] });
     setSelectedUid(node.uid);
+    setSelectedUids([node.uid]);
     setMode("edit");
     setToast({ tone: "success", message: ui.newFocusCreated });
   }
@@ -1384,12 +1416,13 @@ export default function Home() {
       id: `${source.id}_copy`,
       name: `${source.name}${ui.copySuffix}`,
       absX: source.absX + 1,
-      absY: source.absY + 1,
+      absY: Math.max(1, source.absY + 1),
       prerequisiteGroups: source.prerequisiteGroups.map((group) => [...group]),
       mutuallyExclusiveUids: [],
     };
     commit({ ...project, nodes: [...project.nodes, copy] });
     setSelectedUid(copy.uid);
+    setSelectedUids([copy.uid]);
   }
 
   function removeNode(uid: string) {
@@ -1408,17 +1441,19 @@ export default function Home() {
         relativeToUid: node.relativeToUid === uid ? null : node.relativeToUid,
       }));
     commit({ ...project, nodes: nextNodes });
-    setSelectedUid(nextNodes[0]?.uid ?? "");
+    const nextSelectedUid = nextNodes[0]?.uid ?? "";
+    setSelectedUid(nextSelectedUid);
+    setSelectedUids(nextSelectedUid ? [nextSelectedUid] : []);
     setToast({ tone: "success", message: ui.nodeRemoved });
   }
 
-  function moveNodeBy(uid: string, deltaX: number, deltaY: number) {
-    const current = projectRef.current.nodes.find((node) => node.uid === uid);
-    if (!current) return;
+  function moveNodesBy(uids: string[], deltaX: number, deltaY: number) {
+    const movingUids = new Set(uids);
+    if (!movingUids.size) return;
     commit({
       ...projectRef.current,
       nodes: projectRef.current.nodes.map((node) =>
-        node.uid === uid ? { ...node, absX: node.absX + deltaX, absY: node.absY + deltaY } : node,
+        movingUids.has(node.uid) ? { ...node, absX: node.absX + deltaX, absY: node.absY + deltaY } : node,
       ),
     });
   }
@@ -1426,15 +1461,19 @@ export default function Home() {
   function handleNodePointerDown(event: ReactPointerEvent<HTMLButtonElement>, node: FocusNode) {
     if (event.button !== 0 || mode !== "edit") return;
     event.stopPropagation();
+    const movingUids = selectedUidSet.has(node.uid) ? selectedUids : [node.uid];
     setSelectedUid(node.uid);
+    if (!selectedUidSet.has(node.uid)) setSelectedUids([node.uid]);
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
-      uid: node.uid,
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      startAbsX: node.absX,
-      startAbsY: node.absY,
+      startPositions: new Map(
+        projectRef.current.nodes
+          .filter((item) => movingUids.includes(item.uid))
+          .map((item) => [item.uid, { x: item.absX, y: item.absY }]),
+      ),
       before: cloneProject(projectRef.current),
       moved: false,
     };
@@ -1445,16 +1484,17 @@ export default function Home() {
     if (!drag || drag.pointerId !== event.pointerId) return;
     const deltaX = (event.clientX - drag.startClientX) / view.zoom;
     const deltaY = (event.clientY - drag.startClientY) / view.zoom;
-    const nextX = Math.round(drag.startAbsX + deltaX / GRID_X);
-    const nextY = Math.round(drag.startAbsY + deltaY / GRID_Y);
-    if (nextX === drag.startAbsX && nextY === drag.startAbsY && !drag.moved) return;
+    const gridDeltaX = Math.round(deltaX / GRID_X);
+    const gridDeltaY = Math.round(deltaY / GRID_Y);
+    if (gridDeltaX === 0 && gridDeltaY === 0 && !drag.moved) return;
     drag.moved = true;
     setSaveState("saving");
     setProject((current) => ({
       ...current,
-      nodes: current.nodes.map((node) =>
-        node.uid === drag.uid ? { ...node, absX: nextX, absY: nextY } : node,
-      ),
+      nodes: current.nodes.map((node) => {
+        const start = drag.startPositions.get(node.uid);
+        return start ? { ...node, absX: start.x + gridDeltaX, absY: start.y + gridDeltaY } : node;
+      }),
     }));
   }
 
@@ -1470,9 +1510,27 @@ export default function Home() {
   }
 
   function handleCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (mode !== "edit") return;
+    if (event.button === 2) {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      const startX = clamp(event.clientX - rect.left, 0, rect.width);
+      const startY = clamp(event.clientY - rect.top, 0, rect.height);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      marqueeRef.current = {
+        pointerId: event.pointerId,
+        startX,
+        startY,
+        currentX: startX,
+        currentY: startY,
+      };
+      setMarqueeBox({ left: startX, top: startY, width: 0, height: 0 });
+      return;
+    }
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".focus-card, .zoom-controls")) return;
     setSelectedUid("");
+    setSelectedUids([]);
     event.currentTarget.setPointerCapture(event.pointerId);
     panRef.current = {
       pointerId: event.pointerId,
@@ -1484,6 +1542,21 @@ export default function Home() {
   }
 
   function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const marquee = marqueeRef.current;
+    if (marquee?.pointerId === event.pointerId) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const currentX = clamp(event.clientX - rect.left, 0, rect.width);
+      const currentY = clamp(event.clientY - rect.top, 0, rect.height);
+      marquee.currentX = currentX;
+      marquee.currentY = currentY;
+      setMarqueeBox({
+        left: Math.min(marquee.startX, currentX),
+        top: Math.min(marquee.startY, currentY),
+        width: Math.abs(currentX - marquee.startX),
+        height: Math.abs(currentY - marquee.startY),
+      });
+      return;
+    }
     const pan = panRef.current;
     if (!pan || pan.pointerId !== event.pointerId) return;
     setView((current) => ({
@@ -1494,9 +1567,42 @@ export default function Home() {
   }
 
   function handleCanvasPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const marquee = marqueeRef.current;
+    if (marquee?.pointerId === event.pointerId) {
+      const left = Math.min(marquee.startX, marquee.currentX);
+      const top = Math.min(marquee.startY, marquee.currentY);
+      const right = Math.max(marquee.startX, marquee.currentX);
+      const bottom = Math.max(marquee.startY, marquee.currentY);
+      if (right - left >= 4 || bottom - top >= 4) {
+        const matchingUids = projectRef.current.nodes
+          .filter((node) => {
+            const nodeLeft = view.x + worldX(node.absX) * view.zoom;
+            const nodeTop = view.y + worldY(node.absY) * view.zoom;
+            const nodeRight = nodeLeft + NODE_W * view.zoom;
+            const nodeBottom = nodeTop + NODE_H * view.zoom;
+            return nodeLeft <= right && nodeRight >= left && nodeTop <= bottom && nodeBottom >= top;
+          })
+          .map((node) => node.uid);
+        setSelectedUids(matchingUids);
+        setSelectedUid(matchingUids[0] ?? "");
+      }
+      marqueeRef.current = null;
+      setMarqueeBox(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (panRef.current?.pointerId !== event.pointerId) return;
     panRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function handleCanvasPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (marqueeRef.current?.pointerId === event.pointerId) {
+      marqueeRef.current = null;
+      setMarqueeBox(null);
+    }
+    if (panRef.current?.pointerId === event.pointerId) panRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
   function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
@@ -1556,7 +1662,9 @@ export default function Home() {
   ) {
     const imported = parseFocusScript(focusText, localisationMap, localisationLanguage, uiLanguage);
     commit(imported);
-    setSelectedUid(imported.nodes[0]?.uid ?? "");
+    const importedSelectedUid = imported.nodes[0]?.uid ?? "";
+    setSelectedUid(importedSelectedUid);
+    setSelectedUids(importedSelectedUid ? [importedSelectedUid] : []);
     setMode("edit");
     window.setTimeout(fitView, 60);
     setToast({
@@ -1696,7 +1804,7 @@ export default function Home() {
           ArrowDown: [0, step],
         };
         const [deltaX, deltaY] = directions[event.key];
-        moveNodeBy(selectedUid, deltaX, deltaY);
+        moveNodesBy(selectedUidSet.has(selectedUid) ? selectedUids : [selectedUid], deltaX, deltaY);
       } else if (!editing && (event.key === "Delete" || event.key === "Backspace") && selectedUid) {
         event.preventDefault();
         removeNode(selectedUid);
@@ -1843,12 +1951,13 @@ export default function Home() {
         <section className="canvas-column">
           {mode === "edit" ? (
             <div
-              className="focus-canvas"
+              className={`focus-canvas ${marqueeBox ? "is-marquee" : ""}`}
               ref={canvasRef}
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handleCanvasPointerMove}
               onPointerUp={handleCanvasPointerUp}
-              onPointerCancel={handleCanvasPointerUp}
+              onPointerCancel={handleCanvasPointerCancel}
+              onContextMenu={(event) => event.preventDefault()}
               onWheel={handleWheel}
               aria-label={ui.draggableCanvas}
             >
@@ -1865,7 +1974,7 @@ export default function Home() {
                     const second = nodeByUid.get(secondUid);
                     if (!first || !second) return null;
                     const route = buildMutualPath(first, second);
-                    const highlighted = selectedUid === firstUid || selectedUid === secondUid;
+                    const highlighted = selectedUidSet.has(firstUid) || selectedUidSet.has(secondUid);
                     return <g key={`${firstUid}<->${secondUid}`} className={highlighted ? "mutual-connection selected" : "mutual-connection"}>
                       <path className="connector mutual" d={route.d} />
                       <circle className="mutual-badge" cx={route.labelX} cy={route.labelY} r="10" />
@@ -1876,7 +1985,7 @@ export default function Home() {
                     const parent = nodeByUid.get(parentUid);
                     const child = nodeByUid.get(childUid);
                     if (!parent || !child) return null;
-                    const highlighted = selectedUid === child.uid || selectedUid === parent.uid;
+                    const highlighted = selectedUidSet.has(child.uid) || selectedUidSet.has(parent.uid);
                     return <path
                       key={`${parentUid}->${childUid}`}
                       className={`connector prerequisite ${isOr ? "or" : ""} ${highlighted ? "selected" : ""}`}
@@ -1893,12 +2002,13 @@ export default function Home() {
                   return (
                     <button
                       key={node.uid}
-                      className={`focus-card art-${node.artwork % 5} ${selectedUid === node.uid ? "selected" : ""}`}
+                      className={`focus-card art-${node.artwork % 5} ${selectedUidSet.has(node.uid) ? "selected" : ""} ${selectedUid === node.uid ? "primary-selected" : ""}`}
                       style={{ left: worldX(node.absX), top: worldY(node.absY), width: NODE_W, height: NODE_H }}
                       onPointerDown={(event) => handleNodePointerDown(event, node)}
                       onPointerMove={handleNodePointerMove}
                       onPointerUp={handleNodePointerUp}
                       onPointerCancel={handleNodePointerUp}
+                      aria-pressed={selectedUidSet.has(node.uid)}
                       aria-label={ui.focusCoordinate(node.name || node.id, rx, ry)}
                     >
                       <span className="card-art" aria-hidden="true" />
@@ -1909,6 +2019,13 @@ export default function Home() {
                 })}
               </div>
 
+              {marqueeBox && (
+                <div
+                  className="selection-marquee"
+                  style={{ left: marqueeBox.left, top: marqueeBox.top, width: marqueeBox.width, height: marqueeBox.height }}
+                  aria-hidden="true"
+                />
+              )}
               <div className="canvas-help"><MousePointer2 size={14} />{ui.canvasHelp}</div>
               <div className="zoom-controls" aria-label={ui.zoomControls} onPointerDown={(event) => event.stopPropagation()}>
                 <button onClick={() => zoomBy(0.88)} aria-label={ui.zoomOut}><ZoomOut size={17} /></button>
@@ -1948,7 +2065,7 @@ export default function Home() {
                   if (!first || !second) return null;
                   return <line key={`${firstUid}-${secondUid}`} className="mutual" x1={worldX(first.absX) + NODE_W / 2} y1={worldY(first.absY) + NODE_H / 2} x2={worldX(second.absX) + NODE_W / 2} y2={worldY(second.absY) + NODE_H / 2} />;
                 })}
-                {project.nodes.map((node) => <rect key={node.uid} className={node.uid === selectedUid ? "active" : ""} x={worldX(node.absX)} y={worldY(node.absY)} width={NODE_W} height={NODE_H} rx="12" />)}
+                {project.nodes.map((node) => <rect key={node.uid} className={selectedUidSet.has(node.uid) ? "active" : ""} x={worldX(node.absX)} y={worldY(node.absY)} width={NODE_W} height={NODE_H} rx="12" />)}
               </svg>
               <span>{ui.globalLayout}</span>
             </button>
@@ -1990,7 +2107,7 @@ export default function Home() {
         <span><Ban size={13} />{ui.mutualRelations(mutualPairs.length)}</span>
         <span><MousePointer2 size={13} />{ui.gridSnapOn}</span>
         <span className="status-spacer" />
-        <span>{selected ? ui.selectedFocus(selected.id) : ui.noSelectedFocus}</span>
+        <span>{selectedUids.length > 1 ? ui.selectedFocusCount(selectedUids.length) : selected ? ui.selectedFocus(selected.id) : ui.noSelectedFocus}</span>
         <span>{ui.focusCount(project.nodes.length)}</span>
       </footer>
 
