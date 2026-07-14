@@ -25,6 +25,7 @@ import {
   Plus,
   Redo2,
   Save,
+  Scan,
   Settings2,
   Sun,
   Trash2,
@@ -170,7 +171,10 @@ const UI_MESSAGES = {
     focusCoordinate: (name: string, x: number, y: number) => `${name}，坐标 ${x}, ${y}`,
     unnamedFocus: "未命名国策",
     days: (value: number) => `${value} 日`,
-    canvasHelp: "左键拖动节点 · 右键框选 · 方向键微调 · 滚轮缩放",
+    canvasHelp: "左键拖动节点 · Shift + 左键框选 · 滚轮缩放",
+    boxSelect: "框选",
+    boxSelectHint: "开启框选工具，然后用左键拖出选区",
+    boxSelectArmed: "框选已开启 · 左键拖出选区 · Esc 取消",
     zoomControls: "缩放控制",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -319,7 +323,10 @@ const UI_MESSAGES = {
     focusCoordinate: (name: string, x: number, y: number) => `${name}, coordinates ${x}, ${y}`,
     unnamedFocus: "Unnamed Focus",
     days: (value: number) => `${value} days`,
-    canvasHelp: "Left-drag nodes · Right-drag to box-select · Arrow keys to nudge · Wheel to zoom",
+    canvasHelp: "Left-drag nodes · Shift + left-drag to box-select · Wheel to zoom",
+    boxSelect: "Box select",
+    boxSelectHint: "Arm box select, then left-drag a selection area",
+    boxSelectArmed: "Box select armed · Left-drag an area · Esc to cancel",
     zoomControls: "Zoom controls",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -1101,6 +1108,7 @@ export default function Home() {
   const [selectedUid, setSelectedUid] = useState(initialProject.nodes[1].uid);
   const [selectedUids, setSelectedUids] = useState<string[]>([initialProject.nodes[1].uid]);
   const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [marqueeArmed, setMarqueeArmed] = useState(false);
   const [past, setPast] = useState<ProjectState[]>([]);
   const [future, setFuture] = useState<ProjectState[]>([]);
   const [view, setView] = useState<ViewState>({ x: -290, y: 18, zoom: 0.82 });
@@ -1134,6 +1142,7 @@ export default function Home() {
     startY: number;
     currentX: number;
     currentY: number;
+    startedNodeUid: string | null;
   } | null>(null);
 
   const ui = UI_MESSAGES[uiLanguage];
@@ -1459,7 +1468,7 @@ export default function Home() {
   }
 
   function handleNodePointerDown(event: ReactPointerEvent<HTMLButtonElement>, node: FocusNode) {
-    if (event.button !== 0 || mode !== "edit") return;
+    if (event.button !== 0 || event.shiftKey || marqueeArmed || mode !== "edit") return;
     event.stopPropagation();
     const movingUids = selectedUidSet.has(node.uid) ? selectedUids : [node.uid];
     setSelectedUid(node.uid);
@@ -1511,7 +1520,8 @@ export default function Home() {
 
   function handleCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (mode !== "edit") return;
-    if (event.button === 2) {
+    const shouldStartMarquee = event.button === 2 || (event.button === 0 && (event.shiftKey || marqueeArmed));
+    if (shouldStartMarquee) {
       event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
       const startX = clamp(event.clientX - rect.left, 0, rect.width);
@@ -1523,6 +1533,7 @@ export default function Home() {
         startY,
         currentX: startX,
         currentY: startY,
+        startedNodeUid: ((event.target as HTMLElement).closest("[data-focus-uid]") as HTMLElement | null)?.dataset.focusUid ?? null,
       };
       setMarqueeBox({ left: startX, top: startY, width: 0, height: 0 });
       return;
@@ -1544,6 +1555,7 @@ export default function Home() {
   function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const marquee = marqueeRef.current;
     if (marquee?.pointerId === event.pointerId) {
+      event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
       const currentX = clamp(event.clientX - rect.left, 0, rect.width);
       const currentY = clamp(event.clientY - rect.top, 0, rect.height);
@@ -1585,9 +1597,13 @@ export default function Home() {
           .map((node) => node.uid);
         setSelectedUids(matchingUids);
         setSelectedUid(matchingUids[0] ?? "");
+      } else if (marquee.startedNodeUid) {
+        setSelectedUids([marquee.startedNodeUid]);
+        setSelectedUid(marquee.startedNodeUid);
       }
       marqueeRef.current = null;
       setMarqueeBox(null);
+      setMarqueeArmed(false);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       return;
     }
@@ -1600,6 +1616,7 @@ export default function Home() {
     if (marqueeRef.current?.pointerId === event.pointerId) {
       marqueeRef.current = null;
       setMarqueeBox(null);
+      setMarqueeArmed(false);
     }
     if (panRef.current?.pointerId === event.pointerId) panRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1787,7 +1804,16 @@ export default function Home() {
       const target = event.target as HTMLElement;
       const editing = target.matches("input, textarea, select, [contenteditable='true']");
       const modifier = event.ctrlKey || event.metaKey;
-      if (modifier && event.key.toLowerCase() === "z") {
+      if (!editing && event.key === "Escape" && (marqueeArmed || marqueeRef.current)) {
+        event.preventDefault();
+        const activeMarquee = marqueeRef.current;
+        if (activeMarquee && canvasRef.current?.hasPointerCapture(activeMarquee.pointerId)) {
+          canvasRef.current.releasePointerCapture(activeMarquee.pointerId);
+        }
+        marqueeRef.current = null;
+        setMarqueeBox(null);
+        setMarqueeArmed(false);
+      } else if (modifier && event.key.toLowerCase() === "z") {
         event.preventDefault();
         if (event.shiftKey) redo();
         else undo();
@@ -1810,8 +1836,22 @@ export default function Home() {
         removeNode(selectedUid);
       }
     };
+    const handleWindowBlur = () => {
+      const activeMarquee = marqueeRef.current;
+      if (activeMarquee && canvasRef.current?.hasPointerCapture(activeMarquee.pointerId)) {
+        canvasRef.current.releasePointerCapture(activeMarquee.pointerId);
+      }
+      marqueeRef.current = null;
+      panRef.current = null;
+      setMarqueeBox(null);
+      setMarqueeArmed(false);
+    };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
   });
 
   const selectedAnchor = selected?.relativeToUid ? nodeByUid.get(selected.relativeToUid) : null;
@@ -1849,7 +1889,7 @@ export default function Home() {
           <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} role="tab" aria-selected={mode === "edit"}>
             <MapIcon size={15} /> {ui.canvas}
           </button>
-          <button className={mode === "code" ? "active" : ""} onClick={() => setMode("code")} role="tab" aria-selected={mode === "code"}>
+          <button className={mode === "code" ? "active" : ""} onClick={() => { setMarqueeArmed(false); setMode("code"); }} role="tab" aria-selected={mode === "code"}>
             <FileCode2 size={15} /> {ui.codePreview}
           </button>
         </div>
@@ -1951,13 +1991,16 @@ export default function Home() {
         <section className="canvas-column">
           {mode === "edit" ? (
             <div
-              className={`focus-canvas ${marqueeBox ? "is-marquee" : ""}`}
+              className={`focus-canvas ${marqueeBox || marqueeArmed ? "is-marquee" : ""}`}
               ref={canvasRef}
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handleCanvasPointerMove}
               onPointerUp={handleCanvasPointerUp}
               onPointerCancel={handleCanvasPointerCancel}
+              onLostPointerCapture={handleCanvasPointerCancel}
               onContextMenu={(event) => event.preventDefault()}
+              onAuxClick={(event) => event.preventDefault()}
+              onDragStart={(event) => event.preventDefault()}
               onWheel={handleWheel}
               aria-label={ui.draggableCanvas}
             >
@@ -2002,6 +2045,7 @@ export default function Home() {
                   return (
                     <button
                       key={node.uid}
+                      data-focus-uid={node.uid}
                       className={`focus-card art-${node.artwork % 5} ${selectedUidSet.has(node.uid) ? "selected" : ""} ${selectedUid === node.uid ? "primary-selected" : ""}`}
                       style={{ left: worldX(node.absX), top: worldY(node.absY), width: NODE_W, height: NODE_H }}
                       onPointerDown={(event) => handleNodePointerDown(event, node)}
@@ -2026,8 +2070,15 @@ export default function Home() {
                   aria-hidden="true"
                 />
               )}
-              <div className="canvas-help"><MousePointer2 size={14} />{ui.canvasHelp}</div>
+              <div className={`canvas-help ${marqueeArmed ? "active" : ""}`} role="status" aria-live="polite"><MousePointer2 size={14} />{marqueeArmed ? ui.boxSelectArmed : ui.canvasHelp}</div>
               <div className="zoom-controls" aria-label={ui.zoomControls} onPointerDown={(event) => event.stopPropagation()}>
+                <button
+                  className={`selection-tool ${marqueeArmed ? "active" : ""}`}
+                  onClick={() => setMarqueeArmed((current) => !current)}
+                  aria-label={ui.boxSelectHint}
+                  aria-pressed={marqueeArmed}
+                  title={ui.boxSelectHint}
+                ><Scan size={17} />{ui.boxSelect}</button>
                 <button onClick={() => zoomBy(0.88)} aria-label={ui.zoomOut}><ZoomOut size={17} /></button>
                 <span>{Math.round(view.zoom * 100)}%</span>
                 <button onClick={() => zoomBy(1.14)} aria-label={ui.zoomIn}><ZoomIn size={17} /></button>
