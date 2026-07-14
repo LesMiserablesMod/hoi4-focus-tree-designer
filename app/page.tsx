@@ -180,6 +180,8 @@ const UI_MESSAGES = {
     download: "下载",
     navigationAndExport: "导航与导出",
     navigator: "导航器",
+    totalDays: (value: number) => `共计 ${value} 天`,
+    totalDaysHelp: "所有国策节点的完成天数合计（包含互斥国策）",
     fitAllFocuses: "点击适应全部国策",
     globalLayout: "全局布局图 · 点击适应全部节点",
     projectSettings: "项目设置",
@@ -329,6 +331,8 @@ const UI_MESSAGES = {
     download: "Download",
     navigationAndExport: "Navigation and export",
     navigator: "Navigator",
+    totalDays: (value: number) => `Total ${value} ${value === 1 ? "day" : "days"}`,
+    totalDaysHelp: "Sum of completion days for all focus nodes, including mutually exclusive focuses",
     fitAllFocuses: "Fit all focuses",
     globalLayout: "Full layout · Click to fit all nodes",
     projectSettings: "Project Settings",
@@ -1175,6 +1179,7 @@ export default function Home() {
   const validation = useMemo(() => validationFor(project, uiLanguage), [project, uiLanguage]);
   const focusScript = useMemo(() => generateFocusScript(project), [project]);
   const localisation = useMemo(() => generateLocalisation(project), [project]);
+  const totalDays = useMemo(() => project.nodes.reduce((sum, node) => sum + node.days, 0), [project.nodes]);
   const minimapBounds = useMemo(() => {
     if (!project.nodes.length) return { x: 0, y: 0, width: WORLD_W, height: WORLD_H };
     const padding = 72;
@@ -2110,7 +2115,16 @@ export default function Home() {
 
         <aside className="utility-rail" aria-label={ui.navigationAndExport}>
           <section className="utility-card panel-paper minimap-card">
-            <div className="utility-heading"><div><span className="eyebrow">NAVIGATOR</span><h2>{ui.navigator}</h2></div><LocateFixed size={18} /></div>
+            <div className="utility-heading">
+              <div>
+                <span className="eyebrow">NAVIGATOR</span>
+                <div className="navigator-title-row">
+                  <h2>{ui.navigator}</h2>
+                  <span className="navigator-total" title={ui.totalDaysHelp}>{ui.totalDays(totalDays)}</span>
+                </div>
+              </div>
+              <LocateFixed size={18} />
+            </div>
             <button className="minimap" onClick={fitView} aria-label={ui.fitAllFocuses}>
               <svg viewBox={`${minimapBounds.x} ${minimapBounds.y} ${minimapBounds.width} ${minimapBounds.height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                 {prerequisiteEdges.map(({ parentUid, childUid, isOr }) => {
