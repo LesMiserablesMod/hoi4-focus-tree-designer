@@ -45,6 +45,15 @@ import {
   useState,
 } from "react";
 
+import {
+  buildFocusRelationLines,
+  completeMutualGroups,
+  normalizeFocusRelations,
+  prerequisiteBackupAfterManualEdit,
+  prerequisiteGroupsAreFullyMutual,
+  restoreAutoMergedPrerequisiteGroups,
+} from "./focus-relations";
+
 type FocusNode = {
   uid: string;
   id: string;
@@ -54,6 +63,7 @@ type FocusNode = {
   absX: number;
   absY: number;
   prerequisiteGroups: string[][];
+  prerequisiteGroupsBeforeMutualMerge?: string[][];
   mutuallyExclusiveUids: string[];
   relativeToUid: string | null;
   artwork: number;
@@ -136,10 +146,11 @@ const UI_MESSAGES = {
     localisationName: "本地化名称",
     localisationDescription: "本地化描述",
     completionDays: "完成天数",
-    prerequisiteGroups: "前置条件组",
-    prerequisiteLogic: "组间 AND · 组内 OR",
-    addAndGroup: "添加 AND 组",
-    prerequisiteHelp: "每一组至少完成一个；存在多组时，需要每组都满足。",
+    prerequisiteGroups: "前置国策",
+    prerequisiteLogic: "组内 OR · 组间 AND",
+    addFirstPrerequisite: "添加前置国策",
+    addAndGroup: "添加 AND 条件",
+    prerequisiteHelp: "同一条件组内任选其一（OR）；不同条件组必须全部满足（AND）。互斥分支会自动归入同一 OR 组。",
     noPrerequisite: "暂无前置国策",
     and: "并且",
     conditionGroup: (index: number) => `条件组 ${index}`,
@@ -148,8 +159,8 @@ const UI_MESSAGES = {
     deletePrerequisiteGroup: (index: number) => `删除前置条件组 ${index}`,
     removePrerequisite: (name: string) => `移除前置国策 ${name}`,
     addPrerequisite: (index: number) => `向前置条件组 ${index} 添加国策`,
-    addOrAlternative: " OR 备选",
-    addFocusOption: "国策",
+    addOrAlternative: "添加 OR 备选",
+    choosePrerequisite: "选择前置国策",
     mutualFocusGroup: "互斥国策组",
     mutualLogic: "组内两两互斥",
     mutualHelp: "组内每个国策都会显式列出其余全部成员，符合游戏引擎的读取方式。",
@@ -223,6 +234,8 @@ const UI_MESSAGES = {
     copySuffix: "（副本）",
     keepOneFocus: "至少保留一个国策节点。",
     nodeRemoved: "节点及其引用已安全移除。",
+    mutualPrerequisitesMerged: "检测到互斥前置，已自动合并为同一个 OR 条件组。",
+    mutualPrerequisitesRestored: "互斥关系已取消，原来的 AND 前置条件组已恢复。",
     importedFocuses: (count: number) => `已导入 ${count} 个国策。高级效果与图标不会进入这个轻量布局项目。`,
     missingLocalisationHeader: "本地化缺少受支持的 l_<language>: 文件头",
     unsupportedLanguageCode: "本地化文件使用了尚不支持的语言代码",
@@ -253,6 +266,7 @@ const UI_MESSAGES = {
     selfPrerequisite: (id: string) => `${id}：不能将自身设为前置国策`,
     invalidPrerequisiteReference: (id: string) => `${id}：前置国策引用已失效`,
     allPrerequisitesMutual: (id: string) => `${id}：某个前置条件组中的国策均与其互斥`,
+    mutuallyExclusivePrerequisiteGroups: (id: string) => `${id}：互斥国策不能位于不同的 AND 前置组，请将它们放在同一个 OR 组`,
     selfMutual: (id: string) => `${id}：不能与自身互斥`,
     invalidMutualReference: (id: string) => `${id}：互斥国策引用已失效`,
     unsyncedMutual: (id: string) => `${id}：互斥关系未双向同步`,
@@ -287,10 +301,11 @@ const UI_MESSAGES = {
     localisationName: "Localisation Name",
     localisationDescription: "Localisation Description",
     completionDays: "Completion Days",
-    prerequisiteGroups: "Prerequisite Groups",
-    prerequisiteLogic: "AND between groups · OR within a group",
-    addAndGroup: "Add AND Group",
-    prerequisiteHelp: "Complete at least one focus in every group; all groups must be satisfied.",
+    prerequisiteGroups: "Prerequisite Focuses",
+    prerequisiteLogic: "OR within groups · AND between groups",
+    addFirstPrerequisite: "Add Prerequisite",
+    addAndGroup: "Add AND Condition",
+    prerequisiteHelp: "Complete any one focus within a group (OR); every separate group is required (AND). Mutually exclusive branches are merged into one OR group automatically.",
     noPrerequisite: "No prerequisites yet",
     and: "and",
     conditionGroup: (index: number) => `Group ${index}`,
@@ -299,8 +314,8 @@ const UI_MESSAGES = {
     deletePrerequisiteGroup: (index: number) => `Delete prerequisite group ${index}`,
     removePrerequisite: (name: string) => `Remove prerequisite ${name}`,
     addPrerequisite: (index: number) => `Add a focus to prerequisite group ${index}`,
-    addOrAlternative: " OR alternative",
-    addFocusOption: "focus",
+    addOrAlternative: "Add OR Alternative",
+    choosePrerequisite: "Choose Prerequisite",
     mutualFocusGroup: "Mutually Exclusive Group",
     mutualLogic: "Every pair is exclusive",
     mutualHelp: "Every focus explicitly lists every other member, matching how the game engine reads mutual exclusions.",
@@ -374,6 +389,8 @@ const UI_MESSAGES = {
     copySuffix: " (copy)",
     keepOneFocus: "Keep at least one focus node.",
     nodeRemoved: "The node and its references were removed safely.",
+    mutualPrerequisitesMerged: "Mutually exclusive prerequisites were merged into the same OR group automatically.",
+    mutualPrerequisitesRestored: "The mutual exclusion was removed, so the original AND prerequisite groups were restored.",
     importedFocuses: (count: number) => `Imported ${count} ${count === 1 ? "focus" : "focuses"}. Advanced effects and icons are not retained in this lightweight layout project.`,
     missingLocalisationHeader: "The localisation text needs a supported l_<language>: header",
     unsupportedLanguageCode: "The localisation file uses an unsupported language code",
@@ -404,6 +421,7 @@ const UI_MESSAGES = {
     selfPrerequisite: (id: string) => `${id}: a focus cannot be its own prerequisite`,
     invalidPrerequisiteReference: (id: string) => `${id}: a prerequisite reference is invalid`,
     allPrerequisitesMutual: (id: string) => `${id}: every focus in one prerequisite group is mutually exclusive with this focus`,
+    mutuallyExclusivePrerequisiteGroups: (id: string) => `${id}: mutually exclusive focuses cannot be separate AND prerequisites; place them in the same OR group`,
     selfMutual: (id: string) => `${id}: a focus cannot be mutually exclusive with itself`,
     invalidMutualReference: (id: string) => `${id}: a mutually exclusive reference is invalid`,
     unsyncedMutual: (id: string) => `${id}: a mutual exclusion is not synchronized both ways`,
@@ -515,48 +533,11 @@ function cloneProject(project: ProjectState): ProjectState {
     nodes: project.nodes.map((node) => ({
       ...node,
       prerequisiteGroups: node.prerequisiteGroups.map((group) => [...group]),
+      prerequisiteGroupsBeforeMutualMerge: node.prerequisiteGroupsBeforeMutualMerge
+        ?.map((group) => [...group]),
       mutuallyExclusiveUids: [...node.mutuallyExclusiveUids],
     })),
   };
-}
-
-function completeMutualGroups(nodes: FocusNode[]): FocusNode[] {
-  const validUids = new Set(nodes.map((node) => node.uid));
-  const order = new Map(nodes.map((node, index) => [node.uid, index]));
-  const adjacency = new Map(nodes.map((node) => [node.uid, new Set<string>()]));
-
-  nodes.forEach((node) => {
-    node.mutuallyExclusiveUids.forEach((otherUid) => {
-      if (otherUid === node.uid || !validUids.has(otherUid)) return;
-      adjacency.get(node.uid)?.add(otherUid);
-      adjacency.get(otherUid)?.add(node.uid);
-    });
-  });
-
-  const visited = new Set<string>();
-  const peersByUid = new Map<string, string[]>();
-  nodes.forEach((node) => {
-    if (visited.has(node.uid)) return;
-    const members: string[] = [];
-    const queue = [node.uid];
-    visited.add(node.uid);
-    while (queue.length) {
-      const uid = queue.shift()!;
-      members.push(uid);
-      adjacency.get(uid)?.forEach((otherUid) => {
-        if (visited.has(otherUid)) return;
-        visited.add(otherUid);
-        queue.push(otherUid);
-      });
-    }
-    members.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-    members.forEach((uid) => peersByUid.set(uid, members.filter((memberUid) => memberUid !== uid)));
-  });
-
-  return nodes.map((node) => ({
-    ...node,
-    mutuallyExclusiveUids: peersByUid.get(node.uid) ?? [],
-  }));
 }
 
 function normalizeProject(value: unknown): ProjectState | null {
@@ -587,6 +568,11 @@ function normalizeProject(value: unknown): ProjectState | null {
       absX: Number.isFinite(node.absX) ? Number(node.absX) : 0,
       absY: Number.isFinite(node.absY) ? Number(node.absY) : 0,
       prerequisiteGroups: groups,
+      prerequisiteGroupsBeforeMutualMerge: Array.isArray(node.prerequisiteGroupsBeforeMutualMerge)
+        ? node.prerequisiteGroupsBeforeMutualMerge
+          .filter(Array.isArray)
+          .map((group) => group.filter((uid): uid is string => typeof uid === "string"))
+        : undefined,
       mutuallyExclusiveUids: Array.isArray(node.mutuallyExclusiveUids)
         ? node.mutuallyExclusiveUids.filter((uid): uid is string => typeof uid === "string")
         : [],
@@ -602,10 +588,13 @@ function normalizeProject(value: unknown): ProjectState | null {
     prerequisiteGroups: node.prerequisiteGroups
       .map((group) => [...new Set(group.filter((uid) => uid !== node.uid && validUids.has(uid)))])
       .filter((group) => group.length),
+    prerequisiteGroupsBeforeMutualMerge: node.prerequisiteGroupsBeforeMutualMerge
+      ?.map((group) => [...new Set(group.filter((uid) => uid !== node.uid && validUids.has(uid)))])
+      .filter((group) => group.length),
     mutuallyExclusiveUids: [...new Set(node.mutuallyExclusiveUids.filter((uid) => uid !== node.uid && validUids.has(uid)))],
     relativeToUid: node.relativeToUid && node.relativeToUid !== node.uid && validUids.has(node.relativeToUid) ? node.relativeToUid : null,
   }));
-  const nodes = completeMutualGroups(sanitizedNodes);
+  const nodes = normalizeFocusRelations(sanitizedNodes);
 
   return {
     treeId: typeof raw.treeId === "string" ? raw.treeId : "custom_focus_tree",
@@ -647,7 +636,7 @@ function focusCostFromDays(days: number) {
 }
 
 function generateFocusScript(project: ProjectState) {
-  const normalizedNodes = completeMutualGroups(project.nodes);
+  const normalizedNodes = normalizeFocusRelations(project.nodes);
   const nodeByUid = new Map(normalizedNodes.map((node) => [node.uid, node]));
   const sorted = [...normalizedNodes].sort((a, b) => a.absY - b.absY || a.absX - b.absX);
   const treeId = safeToken(project.treeId, "custom_focus_tree");
@@ -659,19 +648,7 @@ function generateFocusScript(project: ProjectState) {
       const x = anchor ? node.absX - anchor.absX : node.absX;
       const y = anchor ? node.absY - anchor.absY : node.absY;
       const relativeLine = anchor ? `\n\t\trelative_position_id = ${anchor.id}` : "";
-      const prerequisiteLines = node.prerequisiteGroups
-        .map((group) => group.map((uid) => nodeByUid.get(uid)?.id).filter(Boolean) as string[])
-        .filter((group) => group.length)
-        .map((group) => `\t\tprerequisite = { ${group.map((id) => `focus = ${id}`).join(" ")} }`);
-      const mutuallyExclusiveIds = node.mutuallyExclusiveUids
-        .map((uid) => nodeByUid.get(uid)?.id)
-        .filter(Boolean) as string[];
-      const relationLines = [
-        ...prerequisiteLines,
-        ...(mutuallyExclusiveIds.length
-          ? [`\t\tmutually_exclusive = { ${mutuallyExclusiveIds.map((id) => `focus = ${id}`).join(" ")} }`]
-          : []),
-      ];
+      const relationLines = buildFocusRelationLines(node, nodeByUid);
       const relationSection = relationLines.length ? `\n\n${relationLines.join("\n")}` : "";
 
       return `\tfocus = {
@@ -846,7 +823,7 @@ function parseFocusScript(
       artwork: node.artwork,
     };
   });
-  const nodes = completeMutualGroups(baseNodes);
+  const nodes = normalizeFocusRelations(baseNodes);
 
   return {
     treeId: scalar(treeBlock, "id") || "imported_focus_tree",
@@ -876,6 +853,7 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
   });
 
   const nodeByUid = new Map(project.nodes.map((node) => [node.uid, node]));
+  const mutualNodeByUid = new Map(completeMutualGroups(project.nodes).map((node) => [node.uid, node]));
   project.nodes.forEach((node) => {
     node.prerequisiteGroups.forEach((group, index) => {
       if (!group.length) warnings.push(ui.emptyPrerequisiteGroup(node.id, index + 1));
@@ -885,6 +863,17 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
         errors.push(ui.allPrerequisitesMutual(node.id));
       }
     });
+    for (let firstIndex = 0; firstIndex < node.prerequisiteGroups.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < node.prerequisiteGroups.length; secondIndex += 1) {
+        if (prerequisiteGroupsAreFullyMutual(
+          node.prerequisiteGroups[firstIndex],
+          node.prerequisiteGroups[secondIndex],
+          mutualNodeByUid,
+        )) {
+          errors.push(ui.mutuallyExclusivePrerequisiteGroups(node.id));
+        }
+      }
+    }
     node.mutuallyExclusiveUids.forEach((uid) => {
       if (uid === node.uid) errors.push(ui.selfMutual(node.id));
       const other = nodeByUid.get(uid);
@@ -1018,7 +1007,7 @@ function PrerequisiteEditor({ nodes, currentUid, groups, ui, onChange }: Prerequ
     <section className="relation-editor prerequisite-editor">
       <div className="relation-editor-head">
         <div><strong>{ui.prerequisiteGroups}</strong><span>{ui.prerequisiteLogic}</span></div>
-        <button type="button" onClick={() => onChange([...groups, []])}><Plus size={13} />{ui.addAndGroup}</button>
+        <button type="button" onClick={() => onChange([...groups, []])}><Plus size={13} />{groups.length ? ui.addAndGroup : ui.addFirstPrerequisite}</button>
       </div>
       <p className="relation-help">{ui.prerequisiteHelp}</p>
       {!groups.length && <div className="relation-empty">{ui.noPrerequisite}</div>}
@@ -1045,7 +1034,7 @@ function PrerequisiteEditor({ nodes, currentUid, groups, ui, onChange }: Prerequ
                   if (event.target.value) updateGroup(index, [...group, event.target.value]);
                 }}
               >
-                <option value="">＋ {ui.addFocus}{group.length ? ui.addOrAlternative : ` ${ui.addFocusOption}`}</option>
+                <option value="">＋ {group.length ? ui.addOrAlternative : ui.choosePrerequisite}</option>
                 {candidates.filter((node) => !group.includes(node.uid)).map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
               </select>
             </div>
@@ -1276,7 +1265,7 @@ export default function Home() {
     setPast((items) => [...items.slice(-59), cloneProject(projectRef.current)]);
     setFuture([]);
     setSaveState("saving");
-    setProject(next);
+    setProject({ ...next, nodes: normalizeFocusRelations(next.nodes) });
   }
 
   function patchProject(patch: Partial<ProjectState>) {
@@ -1284,14 +1273,34 @@ export default function Home() {
   }
 
   function patchNode(uid: string, patch: Partial<FocusNode>) {
+    const requestedGroups = patch.prerequisiteGroups;
+    const patchedNodes = projectRef.current.nodes.map((node) => {
+      if (node.uid !== uid) return node;
+      return {
+        ...node,
+        ...patch,
+        ...(requestedGroups
+          ? { prerequisiteGroupsBeforeMutualMerge: prerequisiteBackupAfterManualEdit(node, requestedGroups) }
+          : {}),
+      };
+    });
+    const nodes = requestedGroups ? normalizeFocusRelations(patchedNodes) : patchedNodes;
     commit({
       ...projectRef.current,
-      nodes: projectRef.current.nodes.map((node) => (node.uid === uid ? { ...node, ...patch } : node)),
+      nodes,
     });
+    if (requestedGroups) {
+      const normalizedGroupCount = nodes.find((node) => node.uid === uid)?.prerequisiteGroups.filter((group) => group.length).length ?? 0;
+      const requestedGroupCount = requestedGroups.filter((group) => group.length).length;
+      if (normalizedGroupCount < requestedGroupCount) {
+        setToast({ tone: "success", message: ui.mutualPrerequisitesMerged });
+      }
+    }
   }
 
   function setMutuallyExclusive(uid: string, nextUids: string[]) {
-    const currentNodes = completeMutualGroups(projectRef.current.nodes);
+    const restoredNodes = restoreAutoMergedPrerequisiteGroups(projectRef.current.nodes);
+    const currentNodes = completeMutualGroups(restoredNodes);
     const nodeByUid = new Map(currentNodes.map((node) => [node.uid, node]));
     const current = nodeByUid.get(uid);
     if (!current) return;
@@ -1323,20 +1332,35 @@ export default function Home() {
       });
     });
 
-    const nodes = completeMutualGroups(currentNodes.map((node) => ({
+    const relationNodes = completeMutualGroups(currentNodes.map((node) => ({
       ...node,
       mutuallyExclusiveUids: [...(adjacency.get(node.uid) ?? [])],
     })));
+    const nodes = normalizeFocusRelations(relationNodes);
     commit({
       ...projectRef.current,
       nodes,
     });
+    const previousPrerequisiteGroupCount = projectRef.current.nodes.reduce(
+      (count, node) => count + node.prerequisiteGroups.filter((group) => group.length).length,
+      0,
+    );
+    const nextPrerequisiteGroupCount = nodes.reduce(
+      (count, node) => count + node.prerequisiteGroups.filter((group) => group.length).length,
+      0,
+    );
+    if (nextPrerequisiteGroupCount < previousPrerequisiteGroupCount) {
+      setToast({ tone: "success", message: ui.mutualPrerequisitesMerged });
+    } else if (nextPrerequisiteGroupCount > previousPrerequisiteGroupCount) {
+      setToast({ tone: "success", message: ui.mutualPrerequisitesRestored });
+    }
   }
 
   function undo() {
     setPast((items) => {
       if (!items.length) return items;
-      const previous = items[items.length - 1];
+      const previousSnapshot = items[items.length - 1];
+      const previous = { ...previousSnapshot, nodes: normalizeFocusRelations(previousSnapshot.nodes) };
       setFuture((next) => [cloneProject(projectRef.current), ...next].slice(0, 60));
       setProject(previous);
       const validUids = new Set(previous.nodes.map((node) => node.uid));
@@ -1357,7 +1381,8 @@ export default function Home() {
   function redo() {
     setFuture((items) => {
       if (!items.length) return items;
-      const next = items[0];
+      const nextSnapshot = items[0];
+      const next = { ...nextSnapshot, nodes: normalizeFocusRelations(nextSnapshot.nodes) };
       setPast((previous) => [...previous.slice(-59), cloneProject(projectRef.current)]);
       setProject(next);
       const validUids = new Set(next.nodes.map((node) => node.uid));
@@ -1445,6 +1470,9 @@ export default function Home() {
         ...node,
         prerequisiteGroups: node.prerequisiteGroups
           .map((group) => group.filter((item) => item !== uid))
+          .filter((group) => group.length),
+        prerequisiteGroupsBeforeMutualMerge: node.prerequisiteGroupsBeforeMutualMerge
+          ?.map((group) => group.filter((item) => item !== uid))
           .filter((group) => group.length),
         mutuallyExclusiveUids: node.mutuallyExclusiveUids.filter((item) => item !== uid),
         relativeToUid: node.relativeToUid === uid ? null : node.relativeToUid,
