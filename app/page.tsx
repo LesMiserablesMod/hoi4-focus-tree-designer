@@ -46,6 +46,7 @@ import {
 } from "react";
 
 import {
+  buildForcedCompletionMap,
   buildFocusRelationLines,
   completeMutualGroups,
   normalizeFocusRelations,
@@ -854,6 +855,7 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
 
   const nodeByUid = new Map(project.nodes.map((node) => [node.uid, node]));
   const mutualNodeByUid = new Map(completeMutualGroups(project.nodes).map((node) => [node.uid, node]));
+  const forcedByUid = buildForcedCompletionMap(mutualNodeByUid);
   project.nodes.forEach((node) => {
     node.prerequisiteGroups.forEach((group, index) => {
       if (!group.length) warnings.push(ui.emptyPrerequisiteGroup(node.id, index + 1));
@@ -869,6 +871,7 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
           node.prerequisiteGroups[firstIndex],
           node.prerequisiteGroups[secondIndex],
           mutualNodeByUid,
+          forcedByUid,
         )) {
           errors.push(ui.mutuallyExclusivePrerequisiteGroups(node.id));
         }

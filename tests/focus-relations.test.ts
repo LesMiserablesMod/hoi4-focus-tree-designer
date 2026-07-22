@@ -127,6 +127,88 @@ test("exports symmetric mutual blocks and one OR prerequisite block", () => {
   ]);
 });
 
+test("merges descendants of mutually exclusive branches into one OR prerequisite", () => {
+  const result = normalizeFocusRelations([
+    node("a", ["b"]),
+    node("b", ["a"]),
+    node("a-child", [], [["a"]]),
+    node("b-child", [], [["b"]]),
+    node("downstream", [], [["a-child"], ["b-child"]]),
+  ]);
+  const nodeByUid = new Map(result.map((item) => [item.uid, item]));
+
+  assert.deepEqual(nodeByUid.get("downstream")?.prerequisiteGroups, [["a-child", "b-child"]]);
+  assert.deepEqual(buildFocusRelationLines(nodeByUid.get("downstream")!, nodeByUid), [
+    "\t\tprerequisite = { focus = A-CHILD focus = B-CHILD }",
+  ]);
+});
+
+test("does not infer branch incompatibility through an OR prerequisite", () => {
+  const result = normalizeFocusRelations([
+    node("a", ["b"]),
+    node("b", ["a"]),
+    node("either-branch", [], [["a", "b"]]),
+    node("b-child", [], [["b"]]),
+    node("downstream", [], [["either-branch"], ["b-child"]]),
+  ]);
+
+  assert.deepEqual(result.find((item) => item.uid === "downstream")?.prerequisiteGroups, [
+    ["either-branch"],
+    ["b-child"],
+  ]);
+});
+
+test("uses an OR created earlier in the same normalization pass", () => {
+  const result = normalizeFocusRelations([
+    node("a", ["b"]),
+    node("b", ["a"]),
+    node("middle", [], [["a"], ["b"]]),
+    node("b-child", [], [["b"]]),
+    node("downstream", [], [["middle"], ["b-child"]]),
+  ]);
+
+  assert.deepEqual(result.find((item) => item.uid === "middle")?.prerequisiteGroups, [["a", "b"]]);
+  assert.deepEqual(result.find((item) => item.uid === "downstream")?.prerequisiteGroups, [
+    ["middle"],
+    ["b-child"],
+  ]);
+});
+
+test("re-derives descendant merges after an ancestor prerequisite changes", () => {
+  const initial = normalizeFocusRelations([
+    node("root"),
+    node("a", ["b"]),
+    node("b", ["a"]),
+    node("a-child", [], [["a"]]),
+    node("b-child", [], [["b"]]),
+    node("downstream", [], [["a-child"], ["b-child"]]),
+  ]);
+  assert.deepEqual(initial.find((item) => item.uid === "downstream")?.prerequisiteGroups, [["a-child", "b-child"]]);
+
+  const changed = normalizeFocusRelations(initial.map((item) =>
+    item.uid === "a-child" ? { ...item, prerequisiteGroups: [["root"]] } : item));
+
+  assert.deepEqual(changed.find((item) => item.uid === "downstream")?.prerequisiteGroups, [
+    ["a-child"],
+    ["b-child"],
+  ]);
+});
+
+test("solves an OR-exitable prerequisite cycle independently of node order", () => {
+  const graph = [
+    node("a", [], [["b", "c"]]),
+    node("b", [], [["a"], ["c"]]),
+    node("c", ["d"]),
+    node("d", ["c"]),
+    node("downstream", [], [["a"], ["d"]]),
+  ];
+  const forward = normalizeFocusRelations(graph);
+  const reversed = normalizeFocusRelations([...graph].reverse());
+
+  assert.deepEqual(forward.find((item) => item.uid === "downstream")?.prerequisiteGroups, [["a", "d"]]);
+  assert.deepEqual(reversed.find((item) => item.uid === "downstream")?.prerequisiteGroups, [["a", "d"]]);
+});
+
 test("does not weaken partially compatible AND groups", () => {
   const result = normalizeFocusRelations([
     node("a", ["b"]),
