@@ -14,6 +14,7 @@ The editor runs entirely in the browser. Your draft stays on your device unless 
 - Complete mutually exclusive groups with bidirectional relationship handling
 - Live validation for IDs, coordinates, broken references, cycles, and deadlocks
 - Import existing `.txt` focus scripts and `.yml` localisation files
+- Preserve unmanaged per-focus script fields such as icons, availability, bypasses, AI weights, and completion effects during TXT round trips
 - Export focus scripts and UTF-8 BOM localisation files
 - Local browser autosave, undo, redo, duplicate, and code preview
 - Chinese and English interfaces
@@ -34,9 +35,9 @@ common/national_focus/<focus_tree>.txt
 localisation/<language>/<focus_tree>_l_<language>.yml
 ```
 
-## Import limitations
+## Import behavior
 
-The importer is intentionally focused on tree layout and relationships. It reads focus IDs, coordinates, prerequisites, mutually exclusive links, and localisation. Advanced effects, icons, comments, and unsupported script blocks are not preserved during a round trip, so keep a backup of the original mod files.
+The importer edits focus IDs, coordinates, duration, prerequisites, mutually exclusive links, and localisation. Other fields inside each imported `focus = { ... }` block—including icons, conditions, AI weights, comments, and completion effects—remain attached to that node and are written back on export. File-level content outside the imported focus tree is not part of the visual project, so keeping a source backup is still recommended.
 
 ## Run locally
 
@@ -67,9 +68,10 @@ HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁
 - 国策 ID、名称、描述、天数与坐标编辑
 - 前置条件、互斥关系与循环/死锁检查
 - TXT 国策脚本与 YML 本地化文件导入导出
+- TXT 往返编辑时保留每个国策内的图标、条件、AI 权重、注释与完成效果等非编辑字段
 - 浏览器本地自动保存、撤销、重做与代码预览
 - 中文和英文界面，以及多语言本地化导出
 
-请注意：导入器主要处理布局和关系，高级效果、图标、注释及暂不支持的脚本块不会在再次导出时保留。编辑现有 Mod 前，请先备份原文件。
+导入后，编辑器只重建国策 ID、坐标、天数、前置与互斥等可视化字段；每个 `focus = { ... }` 内的图标、条件、AI 权重、注释和完成效果等其他内容会随节点保留，并在导出时写回。文件中位于所导入国策树之外的内容不属于可视化项目，因此仍建议保留原文件备份。
 
 本项目是社区制作的 Mod 工具，与 Paradox Interactive 无隶属或官方认可关系。

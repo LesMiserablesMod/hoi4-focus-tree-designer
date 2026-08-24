@@ -37,6 +37,7 @@ import {
 import Image from "next/image";
 import {
   ChangeEvent,
+  CSSProperties,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
   useEffect,
@@ -54,6 +55,19 @@ import {
   prerequisiteGroupsAreFullyMutual,
   restoreAutoMergedPrerequisiteGroups,
 } from "./focus-relations";
+import {
+  findAvailableNodePosition,
+  GRID_X,
+  GRID_Y,
+  NODE_H,
+  NODE_W,
+} from "./canvas-layout";
+import {
+  preserveUnmanagedFocusScript,
+  renderFocusScriptBlock,
+  topLevelBlockBodies,
+  topLevelScalar,
+} from "./hoi4-script";
 
 type FocusNode = {
   uid: string;
@@ -68,6 +82,8 @@ type FocusNode = {
   mutuallyExclusiveUids: string[];
   relativeToUid: string | null;
   artwork: number;
+  /** Focus fields that the visual editor does not manage, retained on import. */
+  scriptExtras?: string;
 };
 
 type UiLanguage = "zh-CN" | "en";
@@ -206,7 +222,7 @@ const UI_MESSAGES = {
     localisationExport: (language: string) => `${language}本地化`,
     copyTwoFiles: "复制两份文件内容",
     pasteFiles: "粘贴 TXT / YML 内容",
-    importNote: "导入仅解析布局、前置、互斥与本地化；高级效果和注释不会被覆盖保存。",
+    importNote: "导入会解析布局、关系与本地化；每个国策内的图标、条件、效果和注释会随节点保留。",
     errorCount: (count: number) => `${count} 个错误`,
     warningCount: (count: number) => `${count} 个提醒`,
     readyToExport: "可以导出",
@@ -224,7 +240,7 @@ const UI_MESSAGES = {
     focusTreeScriptFile: "国策树脚本（.txt）",
     optionalLocalisation: (language: string) => `${language}本地化（可选）`,
     focusNamePlaceholder: "国策名称",
-    importModalWarning: "导入会替换当前画布；不支持的效果、图标与注释不会保留，请先保存原文件。",
+    importModalWarning: "导入会替换当前画布。编辑器不管理的国策字段会保留并在导出时写回；仍建议保留原文件备份。",
     cancel: "取消",
     parseAndImport: "解析并导入",
     damagedDraft: "本地草稿已损坏，已恢复示例国策树。",
@@ -237,7 +253,7 @@ const UI_MESSAGES = {
     nodeRemoved: "节点及其引用已安全移除。",
     mutualPrerequisitesMerged: "检测到互斥前置，已自动合并为同一个 OR 条件组。",
     mutualPrerequisitesRestored: "互斥关系已取消，原来的 AND 前置条件组已恢复。",
-    importedFocuses: (count: number) => `已导入 ${count} 个国策。高级效果与图标不会进入这个轻量布局项目。`,
+    importedFocuses: (count: number) => `已导入 ${count} 个国策，并保留各节点原有的效果、条件、图标与注释。`,
     missingLocalisationHeader: "本地化缺少受支持的 l_<language>: 文件头",
     unsupportedLanguageCode: "本地化文件使用了尚不支持的语言代码",
     localisationMerged: (language: string) => `${language}本地化已按国策 ID 合并。`,
@@ -361,7 +377,7 @@ const UI_MESSAGES = {
     localisationExport: (language: string) => `${language} Localisation`,
     copyTwoFiles: "Copy both file contents",
     pasteFiles: "Paste TXT / YML Content",
-    importNote: "Import reads layout, prerequisites, mutual exclusions, and localisation only. Advanced effects and comments are not preserved.",
+    importNote: "Import reads layout, relationships, and localisation. Icons, conditions, effects, and comments inside each focus are retained.",
     errorCount: (count: number) => `${count} ${count === 1 ? "error" : "errors"}`,
     warningCount: (count: number) => `${count} ${count === 1 ? "warning" : "warnings"}`,
     readyToExport: "Ready to Export",
@@ -379,7 +395,7 @@ const UI_MESSAGES = {
     focusTreeScriptFile: "Focus tree script (.txt)",
     optionalLocalisation: (language: string) => `${language} localisation (optional)`,
     focusNamePlaceholder: "Focus name",
-    importModalWarning: "Import replaces the current canvas. Unsupported effects, icons, and comments are not preserved; save the original files first.",
+    importModalWarning: "Import replaces the current canvas. Unmanaged focus fields are retained and written back on export; keeping a source backup is still recommended.",
     cancel: "Cancel",
     parseAndImport: "Parse and Import",
     damagedDraft: "The local draft was damaged, so the example tree has been restored.",
@@ -392,7 +408,7 @@ const UI_MESSAGES = {
     nodeRemoved: "The node and its references were removed safely.",
     mutualPrerequisitesMerged: "Mutually exclusive prerequisites were merged into the same OR group automatically.",
     mutualPrerequisitesRestored: "The mutual exclusion was removed, so the original AND prerequisite groups were restored.",
-    importedFocuses: (count: number) => `Imported ${count} ${count === 1 ? "focus" : "focuses"}. Advanced effects and icons are not retained in this lightweight layout project.`,
+    importedFocuses: (count: number) => `Imported ${count} ${count === 1 ? "focus" : "focuses"} with their existing effects, conditions, icons, and comments retained.`,
     missingLocalisationHeader: "The localisation text needs a supported l_<language>: header",
     unsupportedLanguageCode: "The localisation file uses an unsupported language code",
     localisationMerged: (language: string) => `${language} localisation was merged by focus ID.`,
@@ -444,10 +460,6 @@ type ProjectState = {
 type ViewState = { x: number; y: number; zoom: number };
 type ToastState = { tone: "success" | "warning" | "error"; message: string } | null;
 
-const GRID_X = 116;
-const GRID_Y = 154;
-const NODE_W = 218;
-const NODE_H = 126;
 const WORLD_W = 1700;
 const WORLD_H = 1180;
 const ORIGIN_X = 740;
@@ -579,6 +591,7 @@ function normalizeProject(value: unknown): ProjectState | null {
         : [],
       relativeToUid: typeof node.relativeToUid === "string" ? node.relativeToUid : null,
       artwork: Number.isFinite(node.artwork) ? Number(node.artwork) : 0,
+      scriptExtras: typeof node.scriptExtras === "string" ? node.scriptExtras : undefined,
     } satisfies FocusNode];
   });
   if (!provisional.length) return null;
@@ -648,21 +661,16 @@ function generateFocusScript(project: ProjectState) {
       const anchor = node.relativeToUid ? nodeByUid.get(node.relativeToUid) : undefined;
       const x = anchor ? node.absX - anchor.absX : node.absX;
       const y = anchor ? node.absY - anchor.absY : node.absY;
-      const relativeLine = anchor ? `\n\t\trelative_position_id = ${anchor.id}` : "";
       const relationLines = buildFocusRelationLines(node, nodeByUid);
-      const relationSection = relationLines.length ? `\n\n${relationLines.join("\n")}` : "";
-
-      return `\tfocus = {
-\t\tid = ${safeToken(node.id, "unnamed_focus")}
-\t\ticon = GFX_goal_generic_construct_civ_factory
-\t\tx = ${x}
-\t\ty = ${y}${relativeLine}
-\t\tcost = ${focusCostFromDays(node.days)}${relationSection}
-
-\t\tcompletion_reward = {
-\t\t\tadd_political_power = 0
-\t\t}
-\t}`;
+      return renderFocusScriptBlock({
+        id: safeToken(node.id, "unnamed_focus"),
+        x,
+        y,
+        relativePositionId: anchor?.id,
+        cost: focusCostFromDays(node.days),
+        relationLines,
+        scriptExtras: node.scriptExtras,
+      });
     })
     .join("\n\n");
 
@@ -694,52 +702,6 @@ function generateLocalisation(project: ProjectState) {
   return `l_${project.localisationLanguage}:\n${lines.join("\n")}\n`;
 }
 
-function findMatchingBrace(text: string, openIndex: number) {
-  let depth = 0;
-  let quote = false;
-  let comment = false;
-  for (let i = openIndex; i < text.length; i += 1) {
-    const char = text[i];
-    const previous = text[i - 1];
-    if (comment) {
-      if (char === "\n") comment = false;
-      continue;
-    }
-    if (!quote && char === "#") {
-      comment = true;
-      continue;
-    }
-    if (char === '"' && previous !== "\\") quote = !quote;
-    if (quote) continue;
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function extractBlocks(text: string, key: string, uiLanguage: UiLanguage = DEFAULT_UI_LANGUAGE) {
-  const blocks: string[] = [];
-  const matcher = new RegExp(`\\b${key}\\s*=\\s*\\{`, "g");
-  let match: RegExpExecArray | null;
-  while ((match = matcher.exec(text))) {
-    const openIndex = text.indexOf("{", match.index);
-    const closeIndex = findMatchingBrace(text, openIndex);
-    if (closeIndex < 0) throw new Error(UI_MESSAGES[uiLanguage].missingClosingBrace(key));
-    blocks.push(text.slice(openIndex + 1, closeIndex));
-    matcher.lastIndex = closeIndex + 1;
-  }
-  return blocks;
-}
-
-function scalar(block: string, key: string) {
-  const matcher = new RegExp(`\\b${key}\\s*=\\s*(?:"([^"]*)"|([^\\s#}]+))`);
-  const match = block.match(matcher);
-  return match?.[1] ?? match?.[2] ?? "";
-}
-
 function parseLocalisation(text: string) {
   const entries = new Map<string, string>();
   const clean = text.replace(/^\uFEFF/, "");
@@ -756,14 +718,14 @@ function parseFocusScript(
   uiLanguage: UiLanguage = DEFAULT_UI_LANGUAGE,
 ) {
   const ui = UI_MESSAGES[uiLanguage];
-  const treeBlocks = extractBlocks(text.replace(/^\uFEFF/, ""), "focus_tree", uiLanguage);
+  const treeBlocks = topLevelBlockBodies(text.replace(/^\uFEFF/, ""), "focus_tree");
   if (!treeBlocks.length) throw new Error(ui.noFocusTree);
   const treeBlock = treeBlocks[0];
-  const focusBlocks = extractBlocks(treeBlock, "focus", uiLanguage);
+  const focusBlocks = topLevelBlockBodies(treeBlock, "focus");
   if (!focusBlocks.length) throw new Error(ui.noFocusBlock);
 
   const raw = focusBlocks.map((block, index) => {
-    const id = scalar(block, "id") || `imported_focus_${index + 1}`;
+    const id = topLevelScalar(block, "id") || `imported_focus_${index + 1}`;
     const focusIdsInBlock = (relationBlock: string) => {
       const ids: string[] = [];
       const matcher = /\bfocus\s*=\s*(?:"([^"]*)"|([^\s#}]+))/g;
@@ -771,20 +733,21 @@ function parseFocusScript(
       while ((match = matcher.exec(relationBlock))) ids.push(match[1] ?? match[2]);
       return ids;
     };
-    const prerequisiteIdGroups = extractBlocks(block, "prerequisite", uiLanguage)
+    const prerequisiteIdGroups = topLevelBlockBodies(block, "prerequisite")
       .map(focusIdsInBlock)
       .filter((group) => group.length);
-    const mutuallyExclusiveIds = extractBlocks(block, "mutually_exclusive", uiLanguage).flatMap(focusIdsInBlock);
-    const parsedCost = Number.parseFloat(scalar(block, "cost") || "10");
+    const mutuallyExclusiveIds = topLevelBlockBodies(block, "mutually_exclusive").flatMap(focusIdsInBlock);
+    const parsedCost = Number.parseFloat(topLevelScalar(block, "cost") || "10");
     return {
       id,
-      x: Number.parseInt(scalar(block, "x") || "0", 10),
-      y: Number.parseInt(scalar(block, "y") || "0", 10),
-      relativeId: scalar(block, "relative_position_id") || null,
+      x: Number.parseInt(topLevelScalar(block, "x") || "0", 10),
+      y: Number.parseInt(topLevelScalar(block, "y") || "0", 10),
+      relativeId: topLevelScalar(block, "relative_position_id") || null,
       prerequisiteIdGroups,
       mutuallyExclusiveIds,
       days: Number.isFinite(parsedCost) && parsedCost > 0 ? Math.max(1, Math.round(parsedCost * 7)) : 70,
       artwork: index % 5,
+      scriptExtras: preserveUnmanagedFocusScript(block),
     };
   });
 
@@ -822,13 +785,22 @@ function parseFocusScript(
       mutuallyExclusiveUids: node.mutuallyExclusiveIds.map((id) => uidById.get(id)).filter(Boolean) as string[],
       relativeToUid: node.relativeId ? uidById.get(node.relativeId) ?? null : null,
       artwork: node.artwork,
+      scriptExtras: node.scriptExtras,
     };
   });
   const nodes = normalizeFocusRelations(baseNodes);
 
+  const countryBlocks = topLevelBlockBodies(treeBlock, "country");
+  const countryTag = countryBlocks
+    .map((countryBlock) => topLevelScalar(countryBlock, "tag")
+      || topLevelBlockBodies(countryBlock, "modifier")
+        .map((modifierBlock) => topLevelScalar(modifierBlock, "tag"))
+        .find(Boolean))
+    .find(Boolean);
+
   return {
-    treeId: scalar(treeBlock, "id") || "imported_focus_tree",
-    countryTag: scalar(treeBlock, "tag") || "TAG",
+    treeId: topLevelScalar(treeBlock, "id") || "imported_focus_tree",
+    countryTag: countryTag || "TAG",
     localisationLanguage,
     nodes,
   } satisfies ProjectState;
@@ -1408,20 +1380,9 @@ export default function Home() {
     const anchor = selected;
     let uidIndex = index;
     while (project.nodes.some((node) => node.uid === `focus-${uidIndex}`)) uidIndex += 1;
-    const occupied = new Set(project.nodes.map((node) => `${node.absX},${node.absY}`));
     const baseX = anchor?.absX ?? 0;
     const baseY = Math.max(1, (anchor?.absY ?? -1) + 2);
-    const offsets = [0, 2, -2, 1, -1, 3, -3, 4, -4];
-    let position = { x: baseX, y: baseY };
-    outer: for (let row = 0; row < 20; row += 1) {
-      for (const offset of offsets) {
-        const candidate = { x: baseX + offset, y: baseY + row * 2 };
-        if (!occupied.has(`${candidate.x},${candidate.y}`)) {
-          position = candidate;
-          break outer;
-        }
-      }
-    }
+    const position = findAvailableNodePosition(project.nodes, { baseX, baseY });
     const node: FocusNode = {
       uid: `focus-${uidIndex}`,
       id: `${safeToken(project.countryTag.toUpperCase(), "TAG")}_new_focus_${index}`,
@@ -1447,13 +1408,17 @@ export default function Home() {
     if (!source) return;
     let copyIndex = 1;
     while (project.nodes.some((node) => node.uid === `${source.uid}-copy-${copyIndex}`)) copyIndex += 1;
+    const position = findAvailableNodePosition(project.nodes, {
+      baseX: source.absX + 2,
+      baseY: Math.max(1, source.absY),
+    });
     const copy: FocusNode = {
       ...source,
       uid: `${source.uid}-copy-${copyIndex}`,
       id: `${source.id}_copy`,
       name: `${source.name}${ui.copySuffix}`,
-      absX: source.absX + 1,
-      absY: Math.max(1, source.absY + 1),
+      absX: position.x,
+      absY: position.y,
       prerequisiteGroups: source.prerequisiteGroups.map((group) => [...group]),
       mutuallyExclusiveUids: [],
     };
@@ -1732,7 +1697,7 @@ export default function Home() {
     setMode("edit");
     window.setTimeout(fitView, 60);
     setToast({
-      tone: "warning",
+      tone: "success",
       message: ui.importedFocuses(imported.nodes.length),
     });
   }
@@ -2046,6 +2011,12 @@ export default function Home() {
             <div
               className={`focus-canvas ${marqueeBox ? "is-marquee" : ""} ${panning ? "is-panning" : ""}`}
               ref={canvasRef}
+              style={{
+                "--grid-x": `${GRID_X}px`,
+                "--grid-y": `${GRID_Y}px`,
+                "--minor-grid-x": `${GRID_X / 4}px`,
+                "--minor-grid-y": `${GRID_Y / 4}px`,
+              } as CSSProperties}
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handleCanvasPointerMove}
               onPointerUp={handleCanvasPointerUp}

@@ -813,7 +813,13 @@ button:disabled {
     linear-gradient(90deg, rgba(180, 87, 87, 0.07) 1px, transparent 1px),
     radial-gradient(ellipse at 70% 18%, rgba(114, 83, 47, 0.08), transparent 35%),
     repeating-linear-gradient(12deg, rgba(102, 76, 43, 0.018) 0, rgba(102, 76, 43, 0.018) 1px, transparent 1px, transparent 5px);
-  background-size: 116px 154px, 116px 154px, 29px 38.5px, 29px 38.5px, 100% 100%, 100% 100%;
+  background-size:
+    var(--grid-x) var(--grid-y),
+    var(--grid-x) var(--grid-y),
+    var(--minor-grid-x) var(--minor-grid-y),
+    var(--minor-grid-x) var(--minor-grid-y),
+    100% 100%,
+    100% 100%;
 }
 
 .focus-canvas:active {
