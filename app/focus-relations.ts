@@ -284,10 +284,17 @@ export function buildForcedCompletionMap<T extends RelationNode>(nodeByUid: Read
   return forcedByUid;
 }
 
-export function normalizeFocusRelations<T extends RelationNode>(nodes: T[]): T[] {
+export function synchronizeMutualPairs<T extends RelationNode>(nodes: T[]): T[] {
+  const adjacent = new Map(nodes.map((node) => [node.uid, new Set(node.mutuallyExclusiveUids)]));
+  nodes.forEach((node) => node.mutuallyExclusiveUids.forEach((uid) => adjacent.get(uid)?.add(node.uid)));
+  return nodes.map((node) => ({ ...node, mutuallyExclusiveUids: [...adjacent.get(node.uid)!].filter((uid) => uid !== node.uid && adjacent.has(uid)) }));
+}
+
+export function normalizeFocusRelations<T extends RelationNode>(nodes: T[], options?: { preservePairs?: boolean }): T[] {
   // Always re-derive automatic OR merges from the user's original groups.
   // This lets descendant merges split again when an ancestor is edited.
-  const completedMutuals = completeMutualGroups(restoreAutoMergedPrerequisiteGroups(nodes));
+  const complete = options?.preservePairs ? synchronizeMutualPairs : completeMutualGroups;
+  const completedMutuals = complete(restoreAutoMergedPrerequisiteGroups(nodes));
   const nodeByUid = new Map(completedMutuals.map((node) => [node.uid, node]));
   const forcedByUid = new Map<string, ReadonlySet<string>>();
   const normalizedByUid = new Map<string, T>();

@@ -57,6 +57,7 @@ import {
   prerequisiteBackupAfterManualEdit,
   prerequisiteGroupsAreFullyMutual,
   restoreAutoMergedPrerequisiteGroups,
+  synchronizeMutualPairs,
 } from "./focus-relations";
 import {
   findAvailableNodePosition,
@@ -66,11 +67,12 @@ import {
   NODE_W,
 } from "./canvas-layout";
 import {
-  preserveUnmanagedFocusScript,
+  renderImportedTree,
+  renameFocusReferences,
   renderFocusScriptBlock,
-  topLevelBlockBodies,
-  topLevelScalar,
 } from "./hoi4-script";
+
+import { readFocusTree, uniqueFocusId, reservedFocusIds, decodeLocalisation, type SourceValues } from "./focus-file";
 
 import { arrangeSelection, findFocuses, removeSelection, setSelectionDays } from "./editor-actions";
 
@@ -89,6 +91,8 @@ type FocusNode = {
   artwork: number;
   /** Focus fields that the visual editor does not manage, retained on import. */
   scriptExtras?: string;
+  sourceId?: string;
+  sourceValues?: SourceValues;
 };
 
 type UiLanguage = "zh-CN" | "en";
@@ -186,7 +190,19 @@ const UI_MESSAGES = {
     saved: "已保存",
     undo: "撤销",
     redo: "重做",
-    save: "保存",
+    save: "保存草稿",
+    backupProject: "下载工程备份",
+    backupHelp: "JSON 保留布局、关系、原始脚本与当前本地化，可再次导入。",
+    sourceTreeHelp: "保留原文件的国家条件、树级设置与其他国策树；国家 TAG 仅供查看。",
+    importedStructureHelp: "导入的关系保持原样。编辑前置或互斥时才重新计算 OR 汇合。",
+    idReferenceHelp: "改 ID 会同步当前文件内可识别的国策引用；其他文件的引用需自行同步。",
+    copyFocus: "复制 TXT",
+    copyLocalisation: "复制 YML",
+    copiedFile: "当前文件已复制。",
+    importChoiceError: "一次导入一份 TXT（或工程 JSON）和同一语言的 YML，避免遗漏文件。",
+    projectImported: "工程备份已恢复。",
+    saveFailed: "未保存",
+    invalidCoordinates: (id: string) => `${id}：坐标必须是有限整数`,
     import: "导入",
     addFocus: "添加国策",
     focusProperties: "国策属性",
@@ -253,7 +269,7 @@ const UI_MESSAGES = {
     localisationExport: (language: string) => `${language}本地化`,
     copyTwoFiles: "复制两份文件内容",
     pasteFiles: "粘贴 TXT / YML 内容",
-    importNote: "导入会解析布局、关系与本地化；每个国策内的图标、条件、效果和注释会随节点保留。",
+    importNote: "导入编辑第一棵国策树，保留树级配置与文件其余内容；同语言的多份 YML 会合并。",
     errorCount: (count: number) => `${count} 个错误`,
     warningCount: (count: number) => `${count} 个提醒`,
     readyToExport: "可以导出",
@@ -271,7 +287,7 @@ const UI_MESSAGES = {
     focusTreeScriptFile: "国策树脚本（.txt）",
     optionalLocalisation: (language: string) => `${language}本地化（可选）`,
     focusNamePlaceholder: "国策名称",
-    importModalWarning: "导入会替换当前画布。编辑器不管理的国策字段会保留并在导出时写回；仍建议保留原文件备份。",
+    importModalWarning: "导入会替换当前画布，可立即撤销。先下载工程备份可随时恢复；树级配置、其他树与效果会保留。",
     cancel: "取消",
     parseAndImport: "解析并导入",
     damagedDraft: "本地草稿已损坏，已恢复示例国策树。",
@@ -308,7 +324,7 @@ const UI_MESSAGES = {
     missingFocusId: "存在未填写 ID 的国策",
     invalidFocusId: (id: string) => `${id}：ID 应以字母或下划线开头，且只含字母、数字、下划线`,
     missingFocusName: (id: string) => `${id}：尚未填写名称`,
-    invalidDays: (id: string) => `${id}：完成天数必须是正整数`,
+    invalidDays: (id: string) => `${id}：完成天数必须是非负数`,
     duplicateId: (id: string) => `${id}：ID 重复`,
     emptyPrerequisiteGroup: (id: string, index: number) => `${id}：前置条件组 ${index} 为空`,
     selfPrerequisite: (id: string) => `${id}：不能将自身设为前置国策`,
@@ -367,7 +383,19 @@ const UI_MESSAGES = {
     saved: "Saved",
     undo: "Undo",
     redo: "Redo",
-    save: "Save",
+    save: "Save draft",
+    backupProject: "Download project backup",
+    backupHelp: "JSON keeps layout, relations, source scripts and current localisation. Import it to restore.",
+    sourceTreeHelp: "Original country conditions, tree settings and other trees are retained. The country tag is read-only.",
+    importedStructureHelp: "Imported relations stay unchanged. Editing prerequisites or exclusions recalculates OR convergence.",
+    idReferenceHelp: "Renaming updates recognized focus references in this file. Update references in other files separately.",
+    copyFocus: "Copy TXT",
+    copyLocalisation: "Copy YML",
+    copiedFile: "File copied to clipboard.",
+    importChoiceError: "Import one TXT (or project JSON) and YML files in one language at a time, so no files are skipped.",
+    projectImported: "Project backup restored.",
+    saveFailed: "Not saved",
+    invalidCoordinates: (id: string) => `${id}: coordinates must be finite integers`,
     import: "Import",
     addFocus: "Add Focus",
     focusProperties: "Focus Properties",
@@ -434,7 +462,7 @@ const UI_MESSAGES = {
     localisationExport: (language: string) => `${language} Localisation`,
     copyTwoFiles: "Copy both file contents",
     pasteFiles: "Paste TXT / YML Content",
-    importNote: "Import reads layout, relationships, and localisation. Icons, conditions, effects, and comments inside each focus are retained.",
+    importNote: "Import edits the first focus tree and retains other file content. Multiple YML files in the same language are merged.",
     errorCount: (count: number) => `${count} ${count === 1 ? "error" : "errors"}`,
     warningCount: (count: number) => `${count} ${count === 1 ? "warning" : "warnings"}`,
     readyToExport: "Ready to Export",
@@ -452,7 +480,7 @@ const UI_MESSAGES = {
     focusTreeScriptFile: "Focus tree script (.txt)",
     optionalLocalisation: (language: string) => `${language} localisation (optional)`,
     focusNamePlaceholder: "Focus name",
-    importModalWarning: "Import replaces the current canvas. Unmanaged focus fields are retained and written back on export; keeping a source backup is still recommended.",
+    importModalWarning: "Import replaces this canvas and can be undone. Download a project backup to restore later. Tree settings, other trees and effects are retained.",
     cancel: "Cancel",
     parseAndImport: "Parse and Import",
     damagedDraft: "The local draft was damaged, so the example tree has been restored.",
@@ -489,7 +517,7 @@ const UI_MESSAGES = {
     missingFocusId: "At least one focus has no ID",
     invalidFocusId: (id: string) => `${id}: IDs must start with a letter or underscore and contain only letters, numbers, and underscores`,
     missingFocusName: (id: string) => `${id}: localisation name is empty`,
-    invalidDays: (id: string) => `${id}: completion days must be a positive integer`,
+    invalidDays: (id: string) => `${id}: completion days must be a non-negative number`,
     duplicateId: (id: string) => `${id}: duplicate ID`,
     emptyPrerequisiteGroup: (id: string, index: number) => `${id}: prerequisite group ${index} is empty`,
     selfPrerequisite: (id: string) => `${id}: a focus cannot be its own prerequisite`,
@@ -508,6 +536,8 @@ const UI_MESSAGES = {
 type UiMessages = (typeof UI_MESSAGES)[UiLanguage];
 
 type ProjectState = {
+  sourceText?: string;
+  localisationExtras?: Record<string, string>;
   treeId: string;
   countryTag: string;
   localisationLanguage: LocalisationLanguage;
@@ -613,6 +643,8 @@ function cloneProject(project: ProjectState): ProjectState {
 function normalizeProject(value: unknown): ProjectState | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as {
+    sourceText?: unknown;
+    localisationExtras?: unknown;
     treeId?: unknown;
     countryTag?: unknown;
     localisationLanguage?: unknown;
@@ -634,7 +666,7 @@ function normalizeProject(value: unknown): ProjectState | null {
       id: node.id,
       name: typeof node.name === "string" ? node.name : node.id,
       description: typeof node.description === "string" ? node.description : "",
-      days: Number.isFinite(node.days) ? Math.max(1, Math.round(Number(node.days))) : 70,
+      days: Number.isFinite(node.days) ? Math.max(0, Number(node.days)) : 70,
       absX: Number.isFinite(node.absX) ? Number(node.absX) : 0,
       absY: Number.isFinite(node.absY) ? Number(node.absY) : 0,
       prerequisiteGroups: groups,
@@ -649,6 +681,8 @@ function normalizeProject(value: unknown): ProjectState | null {
       relativeToUid: typeof node.relativeToUid === "string" ? node.relativeToUid : null,
       artwork: Number.isFinite(node.artwork) ? Number(node.artwork) : 0,
       scriptExtras: typeof node.scriptExtras === "string" ? node.scriptExtras : undefined,
+      sourceId: typeof node.sourceId === "string" ? node.sourceId : undefined,
+      sourceValues: node.sourceValues,
     } satisfies FocusNode];
   });
   if (!provisional.length) return null;
@@ -665,9 +699,11 @@ function normalizeProject(value: unknown): ProjectState | null {
     mutuallyExclusiveUids: [...new Set(node.mutuallyExclusiveUids.filter((uid) => uid !== node.uid && validUids.has(uid)))],
     relativeToUid: node.relativeToUid && node.relativeToUid !== node.uid && validUids.has(node.relativeToUid) ? node.relativeToUid : null,
   }));
-  const nodes = normalizeFocusRelations(sanitizedNodes);
+  const nodes = typeof raw.sourceText === "string" ? sanitizedNodes : normalizeFocusRelations(sanitizedNodes);
 
   return {
+    sourceText: typeof raw.sourceText === "string" ? raw.sourceText : undefined,
+    localisationExtras: raw.localisationExtras && typeof raw.localisationExtras === "object" ? Object.fromEntries(Object.entries(raw.localisationExtras).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : undefined,
     treeId: typeof raw.treeId === "string" ? raw.treeId : "custom_focus_tree",
     countryTag: typeof raw.countryTag === "string" ? raw.countryTag : "TAG",
     localisationLanguage: isLocalisationLanguage(raw.localisationLanguage)
@@ -689,12 +725,22 @@ function worldY(y: number) {
   return ORIGIN_Y + y * GRID_Y;
 }
 
+function fittedView(nodes: FocusNode[], width: number, height: number): ViewState {
+  if (!nodes.length) return { x: 0, y: 0, zoom: 1 };
+  const left = Math.min(...nodes.map((node) => worldX(node.absX)));
+  const right = Math.max(...nodes.map((node) => worldX(node.absX) + NODE_W));
+  const top = Math.min(...nodes.map((node) => worldY(node.absY)));
+  const bottom = Math.max(...nodes.map((node) => worldY(node.absY) + NODE_H));
+  const zoom = clamp(Math.min((width - 80) / (right - left), (height - 100) / (bottom - top)), 0.08, 1.1);
+  return { zoom, x: (width - (right - left) * zoom) / 2 - left * zoom, y: (height - (bottom - top) * zoom) / 2 - top * zoom };
+}
+
 function escapeLocalisation(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, "\\n");
 }
 
 function unescapeLocalisation(value: string) {
-  return value.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  return decodeLocalisation(value);
 }
 
 function safeToken(value: string, fallback: string) {
@@ -703,11 +749,11 @@ function safeToken(value: string, fallback: string) {
 }
 
 function focusCostFromDays(days: number) {
-  return String(Number((Math.max(1, days) / 7).toFixed(6)));
+  return String(Number((Math.max(0, days) / 7).toFixed(6)));
 }
 
 function generateFocusScript(project: ProjectState) {
-  const normalizedNodes = normalizeFocusRelations(project.nodes);
+  const normalizedNodes = project.sourceText ? project.nodes : normalizeFocusRelations(project.nodes);
   const nodeByUid = new Map(normalizedNodes.map((node) => [node.uid, node]));
   const sorted = [...normalizedNodes].sort((a, b) => a.absY - b.absY || a.absX - b.absX);
   const treeId = safeToken(project.treeId, "custom_focus_tree");
@@ -719,17 +765,17 @@ function generateFocusScript(project: ProjectState) {
       const x = anchor ? node.absX - anchor.absX : node.absX;
       const y = anchor ? node.absY - anchor.absY : node.absY;
       const relationLines = buildFocusRelationLines(node, nodeByUid);
-      return renderFocusScriptBlock({
+      return { sourceId: node.sourceId, script: renderFocusScriptBlock({
         id: safeToken(node.id, "unnamed_focus"),
-        x,
-        y,
+        x: node.sourceValues?.x && x === node.sourceValues.relativeX ? node.sourceValues.x : x,
+        y: node.sourceValues?.y && y === node.sourceValues.relativeY ? node.sourceValues.y : y,
         relativePositionId: anchor?.id,
-        cost: focusCostFromDays(node.days),
+        cost: node.sourceValues?.cost && node.days === node.sourceValues.days ? node.sourceValues.cost : focusCostFromDays(node.days),
         relationLines,
         scriptExtras: node.scriptExtras,
-      });
-    })
-    .join("\n\n");
+      }) };
+    });
+  if (project.sourceText) return renderImportedTree(project.sourceText, treeId, focuses);
 
   return `focus_tree = {
 \tid = ${treeId}
@@ -744,19 +790,21 @@ function generateFocusScript(project: ProjectState) {
 
 \tdefault = no
 
-${focuses}
+${focuses.map((focus) => focus.script).join("\n\n")}
 }
 `;
 }
 
 function generateLocalisation(project: ProjectState) {
+  const managedKeys = new Set(project.nodes.flatMap((node) => [node.id, `${node.id}_desc`]));
+  const extraLines = Object.entries(project.localisationExtras ?? {}).filter(([key]) => !managedKeys.has(key)).map(([key, value]) => ` ${key}:0 "${escapeLocalisation(value)}"`);
   const lines = [...project.nodes]
     .sort((a, b) => a.absY - b.absY || a.absX - b.absX)
     .flatMap((node) => [
       ` ${safeToken(node.id, "unnamed_focus")}:0 "${escapeLocalisation(node.name || node.id)}"`,
       ` ${safeToken(node.id, "unnamed_focus")}_desc:0 "${escapeLocalisation(node.description)}"`,
     ]);
-  return `l_${project.localisationLanguage}:\n${lines.join("\n")}\n`;
+  return `l_${project.localisationLanguage}:\n${[...extraLines, ...lines].join("\n")}\n`;
 }
 
 function parseLocalisation(text: string) {
@@ -775,38 +823,8 @@ function parseFocusScript(
   uiLanguage: UiLanguage = DEFAULT_UI_LANGUAGE,
 ) {
   const ui = UI_MESSAGES[uiLanguage];
-  const treeBlocks = topLevelBlockBodies(text.replace(/^\uFEFF/, ""), "focus_tree");
-  if (!treeBlocks.length) throw new Error(ui.noFocusTree);
-  const treeBlock = treeBlocks[0];
-  const focusBlocks = topLevelBlockBodies(treeBlock, "focus");
-  if (!focusBlocks.length) throw new Error(ui.noFocusBlock);
-
-  const raw = focusBlocks.map((block, index) => {
-    const id = topLevelScalar(block, "id") || `imported_focus_${index + 1}`;
-    const focusIdsInBlock = (relationBlock: string) => {
-      const ids: string[] = [];
-      const matcher = /\bfocus\s*=\s*(?:"([^"]*)"|([^\s#}]+))/g;
-      let match: RegExpExecArray | null;
-      while ((match = matcher.exec(relationBlock))) ids.push(match[1] ?? match[2]);
-      return ids;
-    };
-    const prerequisiteIdGroups = topLevelBlockBodies(block, "prerequisite")
-      .map(focusIdsInBlock)
-      .filter((group) => group.length);
-    const mutuallyExclusiveIds = topLevelBlockBodies(block, "mutually_exclusive").flatMap(focusIdsInBlock);
-    const parsedCost = Number.parseFloat(topLevelScalar(block, "cost") || "10");
-    return {
-      id,
-      x: Number.parseInt(topLevelScalar(block, "x") || "0", 10),
-      y: Number.parseInt(topLevelScalar(block, "y") || "0", 10),
-      relativeId: topLevelScalar(block, "relative_position_id") || null,
-      prerequisiteIdGroups,
-      mutuallyExclusiveIds,
-      days: Number.isFinite(parsedCost) && parsedCost > 0 ? Math.max(1, Math.round(parsedCost * 7)) : 70,
-      artwork: index % 5,
-      scriptExtras: preserveUnmanagedFocusScript(block),
-    };
-  });
+  const importedFile = readFocusTree(text);
+  const raw = importedFile.nodes;
 
   const rawById = new Map(raw.map((node) => [node.id, node]));
   const absolute = new Map<string, { x: number; y: number }>();
@@ -843,23 +861,17 @@ function parseFocusScript(
       relativeToUid: node.relativeId ? uidById.get(node.relativeId) ?? null : null,
       artwork: node.artwork,
       scriptExtras: node.scriptExtras,
+      sourceId: node.id,
+      sourceValues: node.sourceValues,
     };
   });
-  const nodes = normalizeFocusRelations(baseNodes);
-
-  const countryBlocks = topLevelBlockBodies(treeBlock, "country");
-  const countryTag = countryBlocks
-    .map((countryBlock) => topLevelScalar(countryBlock, "tag")
-      || topLevelBlockBodies(countryBlock, "modifier")
-        .map((modifierBlock) => topLevelScalar(modifierBlock, "tag"))
-        .find(Boolean))
-    .find(Boolean);
-
   return {
-    treeId: topLevelScalar(treeBlock, "id") || "imported_focus_tree",
-    countryTag: countryTag || "TAG",
+    sourceText: importedFile.sourceText,
+    localisationExtras: Object.fromEntries([...localisation].filter(([key]) => !baseNodes.some((node) => key === node.id || key === `${node.id}_desc`))),
+    treeId: importedFile.treeId,
+    countryTag: importedFile.countryTag,
     localisationLanguage,
-    nodes,
+    nodes: baseNodes,
   } satisfies ProjectState;
 }
 
@@ -878,15 +890,16 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
     ids.set(id, (ids.get(id) ?? 0) + 1);
     if (!id) error(ui.missingFocusId, [node.uid]);
     else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) error(ui.invalidFocusId(id), [node.uid]);
+    if (!Number.isSafeInteger(node.absX) || !Number.isSafeInteger(node.absY)) error(ui.invalidCoordinates(id), [node.uid]);
     if (!node.name.trim()) warning(ui.missingFocusName(id || ui.unnamedFocus), [node.uid]);
-    if (!Number.isInteger(node.days) || node.days < 1) error(ui.invalidDays(id || ui.unnamedFocus), [node.uid]);
+    if (!Number.isFinite(node.days) || node.days < 0) error(ui.invalidDays(id || ui.unnamedFocus), [node.uid]);
   });
   ids.forEach((count, id) => {
     if (id && count > 1) error(ui.duplicateId(id), project.nodes.filter((node) => node.id.trim() === id).map((node) => node.uid));
   });
 
   const nodeByUid = new Map(project.nodes.map((node) => [node.uid, node]));
-  const mutualNodeByUid = new Map(completeMutualGroups(project.nodes).map((node) => [node.uid, node]));
+  const mutualNodeByUid = new Map((project.sourceText ? project.nodes : completeMutualGroups(project.nodes)).map((node) => [node.uid, node]));
   const forcedByUid = buildForcedCompletionMap(mutualNodeByUid);
   project.nodes.forEach((node) => {
     node.prerequisiteGroups.forEach((group, index) => {
@@ -1128,6 +1141,20 @@ function MutualEditor({ nodes, currentUid, values, ui, onChange }: MutualEditorP
   );
 }
 
+function DraftField({ label, value, onCommit, onPending, multiline = false }: { label: string; value: string; onCommit: (value: string) => void; onPending: (pending: boolean) => void; multiline?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  const props = {
+    value: draft,
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { setDraft(event.target.value); onPending(event.target.value !== value); },
+    onBlur: (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => { if (event.target.value !== value) onCommit(event.target.value); setDraft(value); onPending(false); },
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (event.key === "Enter" && !multiline) event.currentTarget.blur();
+      if (event.key === "Escape") { event.stopPropagation(); event.currentTarget.value = value; setDraft(value); event.currentTarget.blur(); }
+    },
+  };
+  return <label>{label}{multiline ? <textarea {...props} rows={5} /> : <input {...props} spellCheck={false} />}</label>;
+}
+
 function CoordinateInput({ label, value, onCommit }: { label: string; value: number; onCommit: (value: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   return <label>{label}<input type="text" inputMode="numeric" value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={(event) => {
@@ -1161,11 +1188,12 @@ export default function Home() {
   const [view, setView] = useState<ViewState>({ x: -290, y: 18, zoom: 0.82 });
   const [mode, setMode] = useState<"edit" | "code">("edit");
   const [toast, setToast] = useState<ToastState>(null);
-  const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [ready, setReady] = useState(false);
   const [pasteImportOpen, setPasteImportOpen] = useState(false);
   const [focusImportDraft, setFocusImportDraft] = useState("");
   const [localisationImportDraft, setLocalisationImportDraft] = useState("");
+  const [canvasSize, setCanvasSize] = useState({ width: 900, height: 600 });
   const [searchQuery, setSearchQuery] = useState("");
   const [batchDays, setBatchDays] = useState("");
   const [issuesOpen, setIssuesOpen] = useState(false);
@@ -1175,6 +1203,8 @@ export default function Home() {
   const canvasColumnRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const projectRef = useRef(project);
+  const editSessionRef = useRef<string | null>(null);
+  const pendingDraftRef = useRef(false);
   const dragRef = useRef<{
     pointerId: number;
     startClientX: number;
@@ -1207,6 +1237,7 @@ export default function Home() {
   const selectedNodes = useMemo(() => project.nodes.filter((node) => selectedUidSet.has(node.uid)), [project.nodes, selectedUidSet]);
   const searchResults = useMemo(() => findFocuses(project.nodes, searchQuery), [project.nodes, searchQuery]);
   const selectionDays = selectedNodes.reduce((sum, node) => sum + node.days, 0);
+  const reservedIds = useMemo(() => project.sourceText ? reservedFocusIds(project.sourceText) : [], [project.sourceText]);
   const activeLocalisationLabel = localisationLabel(project.localisationLanguage, uiLanguage);
   const safeTreeId = safeToken(project.treeId, "focus_tree");
   const focusFilename = `${safeTreeId}.txt`;
@@ -1239,7 +1270,7 @@ export default function Home() {
   const validation = useMemo(() => validationFor(project, uiLanguage), [project, uiLanguage]);
   const focusScript = useMemo(() => generateFocusScript(project), [project]);
   const localisation = useMemo(() => generateLocalisation(project), [project]);
-  const totalDays = useMemo(() => project.nodes.reduce((sum, node) => sum + node.days, 0), [project.nodes]);
+  const totalDays = useMemo(() => Number(project.nodes.reduce((sum, node) => sum + node.days, 0).toFixed(6)), [project.nodes]);
   const minimapBounds = useMemo(() => {
     if (!project.nodes.length) return { x: 0, y: 0, width: WORLD_W, height: WORLD_H };
     const padding = 72;
@@ -1254,6 +1285,23 @@ export default function Home() {
       height: bottom - top + padding * 2,
     };
   }, [project.nodes]);
+
+  useEffect(() => {
+    const element = canvasColumnRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const frame = requestAnimationFrame(() => {
+      const rect = canvasColumnRef.current?.getBoundingClientRect();
+      if (rect) setView(fittedView(projectRef.current.nodes, rect.width, rect.height));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ready]);
 
   useEffect(() => {
     projectRef.current = project;
@@ -1307,8 +1355,9 @@ export default function Home() {
     const timer = window.setTimeout(() => {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-        setSaveState("saved");
+        if (!pendingDraftRef.current) setSaveState("saved");
       } catch {
+        setSaveState("error");
         setToast({ tone: "warning", message: ui.autosaveUnavailable });
       }
     }, 450);
@@ -1332,18 +1381,32 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  function commit(next: ProjectState) {
-    setPast((items) => [...items.slice(-59), cloneProject(projectRef.current)]);
+  function commit(next: ProjectState, editKey?: string) {
+    const before = cloneProject(projectRef.current);
+    if (!editKey || editSessionRef.current !== editKey) setPast((items) => [...items.slice(-59), before]);
+    editSessionRef.current = editKey ?? null;
     setFuture([]);
     setSaveState("saving");
-    setProject({ ...next, nodes: normalizeFocusRelations(next.nodes) });
+    const normalized = { ...next, nodes: next.sourceText ? next.nodes : normalizeFocusRelations(next.nodes) };
+    projectRef.current = normalized;
+    setProject(normalized);
   }
 
-  function patchProject(patch: Partial<ProjectState>) {
-    commit({ ...projectRef.current, ...patch });
+  function patchProject(patch: Partial<ProjectState>, editKey?: string) {
+    commit({ ...projectRef.current, ...patch }, editKey);
   }
 
-  function patchNode(uid: string, patch: Partial<FocusNode>) {
+  function patchNode(uid: string, patch: Partial<FocusNode>, editKey?: string) {
+    if (patch.id !== undefined) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(patch.id)) {
+        setToast({ tone: "error", message: ui.invalidFocusId(patch.id) });
+        return;
+      }
+      if ([...projectRef.current.nodes.filter((node) => node.uid !== uid), ...reservedIds].some((node) => node.id === patch.id)) {
+        setToast({ tone: "error", message: ui.duplicateId(patch.id) });
+        return;
+      }
+    }
     const requestedGroups = patch.prerequisiteGroups;
     const patchedNodes = projectRef.current.nodes.map((node) => {
       if (node.uid !== uid) return node;
@@ -1355,11 +1418,19 @@ export default function Home() {
           : {}),
       };
     });
-    const nodes = requestedGroups ? normalizeFocusRelations(patchedNodes) : patchedNodes;
+    let nodes = requestedGroups ? normalizeFocusRelations(patchedNodes, { preservePairs: Boolean(projectRef.current.sourceText) }) : patchedNodes;
+    const previous = projectRef.current.nodes.find((node) => node.uid === uid);
+    const renamed = previous && patch.id && patch.id !== previous.id && /^[A-Za-z_][A-Za-z0-9_]*$/.test(patch.id) && !nodes.some((node) => node.uid !== uid && node.id === patch.id);
+    let sourceText = projectRef.current.sourceText;
+    if (renamed) {
+      nodes = nodes.map((node) => ({ ...node, scriptExtras: node.scriptExtras && renameFocusReferences(node.scriptExtras, previous.id, patch.id!) }));
+      if (sourceText) sourceText = renameFocusReferences(sourceText, previous.id, patch.id!);
+    }
     commit({
       ...projectRef.current,
+      sourceText,
       nodes,
-    });
+    }, editKey);
     if (requestedGroups) {
       const normalizedGroupCount = nodes.find((node) => node.uid === uid)?.prerequisiteGroups.filter((group) => group.length).length ?? 0;
       const requestedGroupCount = requestedGroups.filter((group) => group.length).length;
@@ -1371,7 +1442,8 @@ export default function Home() {
 
   function setMutuallyExclusive(uid: string, nextUids: string[]) {
     const restoredNodes = restoreAutoMergedPrerequisiteGroups(projectRef.current.nodes);
-    const currentNodes = completeMutualGroups(restoredNodes);
+    const complete = projectRef.current.sourceText ? synchronizeMutualPairs : completeMutualGroups;
+    const currentNodes = complete(restoredNodes);
     const nodeByUid = new Map(currentNodes.map((node) => [node.uid, node]));
     const current = nodeByUid.get(uid);
     if (!current) return;
@@ -1403,15 +1475,11 @@ export default function Home() {
       });
     });
 
-    const relationNodes = completeMutualGroups(currentNodes.map((node) => ({
+    const relationNodes = complete(currentNodes.map((node) => ({
       ...node,
       mutuallyExclusiveUids: [...(adjacency.get(node.uid) ?? [])],
     })));
-    const nodes = normalizeFocusRelations(relationNodes);
-    commit({
-      ...projectRef.current,
-      nodes,
-    });
+    const nodes = normalizeFocusRelations(relationNodes, { preservePairs: Boolean(projectRef.current.sourceText) });
     const previousPrerequisiteGroupCount = projectRef.current.nodes.reduce(
       (count, node) => count + node.prerequisiteGroups.filter((group) => group.length).length,
       0,
@@ -1420,6 +1488,7 @@ export default function Home() {
       (count, node) => count + node.prerequisiteGroups.filter((group) => group.length).length,
       0,
     );
+    commit({ ...projectRef.current, nodes });
     if (nextPrerequisiteGroupCount < previousPrerequisiteGroupCount) {
       setToast({ tone: "success", message: ui.mutualPrerequisitesMerged });
     } else if (nextPrerequisiteGroupCount > previousPrerequisiteGroupCount) {
@@ -1427,48 +1496,33 @@ export default function Home() {
     }
   }
 
+  function restoreSnapshot(snapshot: ProjectState) {
+    editSessionRef.current = null;
+    const next = { ...snapshot, nodes: snapshot.sourceText ? snapshot.nodes : normalizeFocusRelations(snapshot.nodes) };
+    projectRef.current = next;
+    setProject(next);
+    setSaveState("saving");
+    const valid = new Set(next.nodes.map((node) => node.uid));
+    const selection = selectedUids.filter((uid) => valid.has(uid));
+    const fallback = next.nodes[0]?.uid ?? "";
+    setSelectedUids(selection.length ? selection : fallback ? [fallback] : []);
+    setSelectedUid(valid.has(selectedUid) ? selectedUid : selection[0] ?? fallback);
+  }
+
   function undo() {
-    setPast((items) => {
-      if (!items.length) return items;
-      const previousSnapshot = items[items.length - 1];
-      const previous = { ...previousSnapshot, nodes: normalizeFocusRelations(previousSnapshot.nodes) };
-      setFuture((next) => [cloneProject(projectRef.current), ...next].slice(0, 60));
-      setProject(previous);
-      const validUids = new Set(previous.nodes.map((node) => node.uid));
-      if (!validUids.has(selectedUid)) {
-        const fallbackUid = previous.nodes[0]?.uid ?? "";
-        setSelectedUid(fallbackUid);
-        setSelectedUids(fallbackUid ? [fallbackUid] : []);
-      } else {
-        setSelectedUids((current) => {
-          const validSelection = current.filter((uid) => validUids.has(uid));
-          return validSelection.length ? validSelection : [selectedUid];
-        });
-      }
-      return items.slice(0, -1);
-    });
+    if (!past.length) return;
+    setFuture([cloneProject(projectRef.current), ...future].slice(0, 60));
+    const previous = past[past.length - 1];
+    setPast(past.slice(0, -1));
+    restoreSnapshot(previous);
   }
 
   function redo() {
-    setFuture((items) => {
-      if (!items.length) return items;
-      const nextSnapshot = items[0];
-      const next = { ...nextSnapshot, nodes: normalizeFocusRelations(nextSnapshot.nodes) };
-      setPast((previous) => [...previous.slice(-59), cloneProject(projectRef.current)]);
-      setProject(next);
-      const validUids = new Set(next.nodes.map((node) => node.uid));
-      if (!validUids.has(selectedUid)) {
-        const fallbackUid = next.nodes[0]?.uid ?? "";
-        setSelectedUid(fallbackUid);
-        setSelectedUids(fallbackUid ? [fallbackUid] : []);
-      } else {
-        setSelectedUids((current) => {
-          const validSelection = current.filter((uid) => validUids.has(uid));
-          return validSelection.length ? validSelection : [selectedUid];
-        });
-      }
-      return items.slice(1);
-    });
+    if (!future.length) return;
+    setPast([...past.slice(-59), cloneProject(projectRef.current)]);
+    const next = future[0];
+    setFuture(future.slice(1));
+    restoreSnapshot(next);
   }
 
   function addNode() {
@@ -1481,7 +1535,7 @@ export default function Home() {
     const position = findAvailableNodePosition(project.nodes, { baseX, baseY });
     const node: FocusNode = {
       uid: `focus-${uidIndex}`,
-      id: `${safeToken(project.countryTag.toUpperCase(), "TAG")}_new_focus_${index}`,
+      id: uniqueFocusId([...project.nodes, ...reservedIds], `${safeToken(project.countryTag.toUpperCase(), "TAG")}_new_focus_${index}`),
       name: ui.newFocusName,
       description: ui.newFocusDescription,
       days: 70,
@@ -1511,7 +1565,9 @@ export default function Home() {
     const copy: FocusNode = {
       ...source,
       uid: `${source.uid}-copy-${copyIndex}`,
-      id: `${source.id}_copy`,
+      id: uniqueFocusId([...project.nodes, ...reservedIds], `${source.id}_copy`),
+      sourceId: undefined,
+      sourceValues: undefined,
       name: `${source.name}${ui.copySuffix}`,
       absX: position.x,
       absY: position.y,
@@ -1781,16 +1837,7 @@ export default function Home() {
     setMode("edit");
     const rect = canvasColumnRef.current?.getBoundingClientRect();
     if (!rect || !nodes.length) return;
-    const left = Math.min(...nodes.map((node) => worldX(node.absX)));
-    const right = Math.max(...nodes.map((node) => worldX(node.absX) + NODE_W));
-    const top = Math.min(...nodes.map((node) => worldY(node.absY)));
-    const bottom = Math.max(...nodes.map((node) => worldY(node.absY) + NODE_H));
-    const zoom = clamp(Math.min((rect.width - 80) / (right - left), (rect.height - 100) / (bottom - top)), 0.08, 1.1);
-    setView({
-      zoom,
-      x: (rect.width - (right - left) * zoom) / 2 - left * zoom,
-      y: (rect.height - (bottom - top) * zoom) / 2 - top * zoom,
-    });
+    setView(fittedView(nodes, rect.width, rect.height));
   }
 
   function fitView() {
@@ -1857,7 +1904,22 @@ export default function Home() {
     if (!files.length) return;
     try {
       const texts = await Promise.all(files.map(async (file) => ({ name: file.name, text: await file.text() })));
-      const focusFile = texts.find((item) => /\bfocus_tree\s*=\s*\{/.test(item.text));
+      const jsonFiles = texts.filter((item) => item.name.endsWith(".json"));
+      if (jsonFiles.length) {
+        if (texts.length !== 1) throw new Error(ui.importChoiceError);
+        const backup = JSON.parse(jsonFiles[0].text);
+        if (backup.format !== "hoi4-focus-project" || backup.version !== 1) throw new Error(ui.unrecognizedFile);
+        const restored = normalizeProject(backup.project);
+        if (!restored || new Set(restored.nodes.map((node) => node.uid)).size !== restored.nodes.length) throw new Error(ui.unrecognizedFile);
+        commit(restored);
+        setSelectedUid(restored.nodes[0].uid); setSelectedUids([restored.nodes[0].uid]);
+        setMode("edit"); window.setTimeout(fitView, 60);
+        setToast({ tone: "success", message: ui.projectImported });
+        return;
+      }
+      const focusFiles = texts.filter((item) => /\bfocus_tree\s*=\s*\{/.test(item.text));
+      if (focusFiles.length > 1) throw new Error(ui.importChoiceError);
+      const focusFile = focusFiles[0];
       const localisationCandidates = texts.filter((item) => /^\uFEFF?\s*l_[A-Za-z_]+\s*:/m.test(item.text));
       const localisationFiles = texts.flatMap((item) => {
         const language = detectLocalisationLanguage(item.text);
@@ -1866,11 +1928,13 @@ export default function Home() {
       if (localisationCandidates.length && !localisationFiles.length) {
         throw new Error(ui.unsupportedLanguageCode);
       }
+      if (new Set(localisationFiles.map((file) => file.language)).size > 1) throw new Error(ui.importChoiceError);
+      if (texts.some((item) => item !== focusFile && !localisationFiles.some((file) => file.name === item.name))) throw new Error(ui.unrecognizedFile);
       const preferredLocalisation = localisationFiles.find(
         (item) => item.language === projectRef.current.localisationLanguage,
       ) ?? localisationFiles[0];
       const localisationMap = preferredLocalisation
-        ? parseLocalisation(preferredLocalisation.text)
+        ? new Map(localisationFiles.flatMap((file) => [...parseLocalisation(file.text)]))
         : new Map<string, string>();
 
       if (focusFile) {
@@ -1884,6 +1948,7 @@ export default function Home() {
         const next = {
           ...currentProject,
           localisationLanguage: preferredLocalisation.language,
+          localisationExtras: { ...currentProject.localisationExtras, ...Object.fromEntries([...localisationMap].filter(([key]) => !currentProject.nodes.some((node) => key === node.id || key === `${node.id}_desc`))) },
           nodes: currentProject.nodes.map((node) => ({
             ...node,
             name: localisationMap.get(node.id) ?? node.name,
@@ -1926,21 +1991,27 @@ export default function Home() {
     });
   }
 
-  async function copyAll() {
+  async function copyFile(kind: "focus" | "localisation") {
+    if (validation.errors.length) { guardExport(() => {}); return; }
     try {
-      await navigator.clipboard.writeText(`# common/national_focus/${focusFilename}\n\n${focusScript}\n# localisation/${project.localisationLanguage}/${localisationFilename}\n\n${localisation}`);
-      setToast({ tone: "success", message: ui.copiedToClipboard });
+      await navigator.clipboard.writeText(kind === "focus" ? focusScript : localisation);
+      setToast({ tone: "success", message: ui.copiedFile });
     } catch {
       setToast({ tone: "error", message: ui.clipboardDenied });
     }
   }
 
+  function backupProject() {
+    downloadText(`${safeTreeId}.hoi4-project.json`, JSON.stringify({ format: "hoi4-focus-project", version: 1, project: projectRef.current }, null, 2));
+  }
+
   function saveNow() {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projectRef.current));
       setSaveState("saved");
       setToast({ tone: "success", message: ui.draftSaved });
     } catch {
+      setSaveState("error");
       setToast({ tone: "error", message: ui.draftSaveFailed });
     }
   }
@@ -1957,6 +2028,7 @@ export default function Home() {
       }
       if (modifier && event.key.toLowerCase() === "s") {
         event.preventDefault();
+        if (editing) target.blur();
         saveNow();
         return;
       }
@@ -2010,6 +2082,10 @@ export default function Home() {
         removeNodes(selectedUids);
       }
     };
+    const flushBeforeLeaving = () => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projectRef.current)); } catch { /* Storage errors are already visible in the editor. */ }
+    };
     const handleWindowBlur = () => {
       const activeMarquee = marqueeRef.current;
       const activePointerId = activeMarquee?.pointerId ?? panRef.current?.pointerId;
@@ -2029,11 +2105,19 @@ export default function Home() {
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("beforeunload", flushBeforeLeaving);
+    window.addEventListener("pagehide", flushBeforeLeaving);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("beforeunload", flushBeforeLeaving);
+      window.removeEventListener("pagehide", flushBeforeLeaving);
     };
   });
+
+  const rulerStep = view.zoom < 0.25 ? 5 : view.zoom < 0.7 ? 2 : 1;
+  const firstTick = Math.floor(((-view.x / view.zoom - ORIGIN_X) / GRID_X) / rulerStep) * rulerStep;
+  const rulerTicks = Array.from({ length: Math.min(150, Math.ceil(canvasSize.width / (GRID_X * view.zoom * rulerStep)) + 2) }, (_, index) => firstTick + index * rulerStep);
 
   const selectedAnchor = selected?.relativeToUid ? nodeByUid.get(selected.relativeToUid) : null;
   const relativeX = selected ? selected.absX - (selectedAnchor?.absX ?? 0) : 0;
@@ -2094,11 +2178,11 @@ export default function Home() {
             <button className={uiLanguage === "zh-CN" ? "active" : ""} onClick={() => setUiLanguage("zh-CN")} aria-pressed={uiLanguage === "zh-CN"} title={ui.chineseInterface}>中</button>
             <button className={uiLanguage === "en" ? "active" : ""} onClick={() => setUiLanguage("en")} aria-pressed={uiLanguage === "en"} title={ui.englishInterface}>EN</button>
           </div>
-          <span className="save-indicator"><span className={saveState === "saving" ? "saving-dot" : "saved-dot"} />{saveState === "saving" ? ui.saving : ui.saved}</span>
+          <span className="save-indicator"><span className={saveState === "saving" ? "saving-dot" : "saved-dot"} />{saveState === "saving" ? ui.saving : saveState === "error" ? ui.saveFailed : ui.saved}</span>
           <button className="icon-button" onClick={undo} disabled={!past.length} aria-label={ui.undo} title={`${ui.undo} Ctrl+Z`}><Undo2 size={17} /></button>
           <button className="icon-button" onClick={redo} disabled={!future.length} aria-label={ui.redo} title={`${ui.redo} Ctrl+Y`}><Redo2 size={17} /></button>
           <button className="secondary-button" onClick={saveNow}><Save size={16} />{ui.save}</button>
-          <label className="secondary-button file-button"><Upload size={16} />{ui.import}<input type="file" accept=".txt,.yml,.yaml" multiple onChange={handleImport} /></label>
+          <label className="secondary-button file-button"><Upload size={16} />{ui.import}<input type="file" accept=".txt,.yml,.yaml,.json" multiple onChange={handleImport} /></label>
           <button className="primary-button" onClick={addNode}><Plus size={17} />{ui.addFocus}</button>
         </div>
       </header>
@@ -2129,16 +2213,18 @@ export default function Home() {
             </div>
           ) : selected ? (
             <div className="inspector-form">
-              <label>{ui.focusId}<input value={selected.id} spellCheck={false} onChange={(event) => patchNode(selected.uid, { id: event.target.value })} /></label>
-              <label>{ui.localisationName} · {activeLocalisationLabel}<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value })} /></label>
-              <label>{ui.localisationDescription} · {activeLocalisationLabel}<textarea value={selected.description} rows={6} onChange={(event) => patchNode(selected.uid, { description: event.target.value })} /></label>
-              <label>{ui.completionDays}<input type="number" min="1" step="1" value={selected.days} onChange={(event) => {
+              <DraftField key={`${selected.uid}-id-${selected.id}`} label={ui.focusId} value={selected.id} onCommit={(id) => patchNode(selected.uid, { id: id.trim() })} onPending={(pending) => { pendingDraftRef.current = pending; if (pending) setSaveState("saving"); else saveNow(); }} />
+              <p className="workflow-help">{ui.idReferenceHelp}</p>
+              <label>{ui.localisationName} · {activeLocalisationLabel}<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value }, `${selected.uid}:name`)} onBlur={() => { editSessionRef.current = null; }} /></label>
+              <label>{ui.localisationDescription} · {activeLocalisationLabel}<textarea value={selected.description} rows={5} onChange={(event) => patchNode(selected.uid, { description: event.target.value }, `${selected.uid}:description`)} onBlur={() => { editSessionRef.current = null; }} /></label>
+              <label>{ui.completionDays}<input type="number" min="0" step="any" value={selected.days} onChange={(event) => {
                 const days = event.currentTarget.valueAsNumber;
-                if (Number.isFinite(days)) patchNode(selected.uid, { days: Math.max(1, Math.round(days)) });
+                if (Number.isFinite(days)) patchNode(selected.uid, { days: Math.max(0, days) });
               }} /></label>
 
               <div className="ornament-rule"><span /></div>
 
+              {project.sourceText && <p className="workflow-help">{ui.importedStructureHelp}</p>}
               <PrerequisiteEditor
                 nodes={project.nodes}
                 currentUid={selected.uid}
@@ -2206,10 +2292,12 @@ export default function Home() {
               ref={canvasRef}
               tabIndex={0}
               style={{
-                "--grid-x": `${GRID_X}px`,
-                "--grid-y": `${GRID_Y}px`,
-                "--minor-grid-x": `${GRID_X / 4}px`,
-                "--minor-grid-y": `${GRID_Y / 4}px`,
+                "--grid-x": `${GRID_X * view.zoom}px`,
+                "--grid-y": `${GRID_Y * view.zoom}px`,
+                "--minor-grid-x": `${GRID_X * view.zoom / 4}px`,
+                "--minor-grid-y": `${GRID_Y * view.zoom / 4}px`,
+                "--grid-origin-x": `${view.x + ORIGIN_X * view.zoom}px`,
+                "--grid-origin-y": `${view.y + ORIGIN_Y * view.zoom}px`,
               } as CSSProperties}
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handleCanvasPointerMove}
@@ -2220,7 +2308,7 @@ export default function Home() {
               onWheel={handleWheel}
               aria-label={ui.draggableCanvas}
             >
-              <div className="coordinate-ruler ruler-top" aria-hidden="true"><span>-6</span><span>-4</span><span>-2</span><span>0</span><span>2</span><span>4</span><span>6</span></div>
+              <div className="coordinate-ruler ruler-top" aria-hidden="true">{rulerTicks.map((x) => <span key={x} style={{ left: view.x + worldX(x) * view.zoom }}>{x}</span>)}</div>
               <div className="north-mark" aria-hidden="true">N<span>↑</span></div>
               <div className="canvas-world" style={{ width: WORLD_W, height: WORLD_H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
                 <svg className="connector-layer" width={WORLD_W} height={WORLD_H} aria-hidden="true">
@@ -2255,9 +2343,8 @@ export default function Home() {
                 </svg>
 
                 {project.nodes.map((node) => {
-                  const anchor = node.relativeToUid ? nodeByUid.get(node.relativeToUid) : null;
-                  const rx = node.absX - (anchor?.absX ?? 0);
-                  const ry = node.absY - (anchor?.absY ?? 0);
+                  const rx = node.absX;
+                  const ry = node.absY;
                   return (
                     <button
                       key={node.uid}
@@ -2304,7 +2391,7 @@ export default function Home() {
             <div className="code-preview panel-paper">
               <div className="code-preview-head">
                 <div><span className="eyebrow">EXPORT PREVIEW</span><h2>{ui.gameFilePreview}</h2></div>
-                <button className="secondary-button" onClick={copyAll}><Clipboard size={15} />{ui.copyAll}</button>
+                <button className="secondary-button" onClick={() => copyFile("focus")}><Clipboard size={15} />{ui.copyFocus}</button>
               </div>
               <div className="code-grid">
                 <article><header><FileText size={15} /><span>{focusFilename}</span><button onClick={exportFocus}><Download size={14} />{ui.download}</button></header><pre>{focusScript}</pre></article>
@@ -2364,8 +2451,9 @@ export default function Home() {
 
           <section className="utility-card panel-paper project-card">
             <div className="utility-heading"><div><span className="eyebrow">PROJECT</span><h2>{ui.projectSettings}</h2></div><Settings2 size={18} /></div>
-            <label>{ui.treeId}<input ref={treeIdRef} value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value })} /></label>
-            <label>{ui.countryTag}<input ref={countryTagRef} value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() })} /></label>
+            <label>{ui.treeId}<input ref={treeIdRef} value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value }, "treeId")} onBlur={() => { editSessionRef.current = null; }} /></label>
+            <label>{ui.countryTag}<input ref={countryTagRef} disabled={Boolean(project.sourceText)} value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() }, "countryTag")} /></label>
+            {project.sourceText && <p className="workflow-help">{ui.sourceTreeHelp}</p>}
             <label>{ui.localisationLanguage}
               <select
                 value={project.localisationLanguage}
@@ -2381,7 +2469,8 @@ export default function Home() {
             <div className="utility-heading"><div><span className="eyebrow">EXPORT</span><h2>{ui.exportFiles}</h2></div><Download size={18} /></div>
             <button className="export-button primary" onClick={exportFocus}><FileText size={18} /><span><strong>{ui.focusScript}</strong><small>common/national_focus · .txt</small></span><Download size={16} /></button>
             <button className="export-button" onClick={exportLocalisation}><Languages size={18} /><span><strong>{ui.localisationExport(activeLocalisationLabel)}</strong><small>localisation/{project.localisationLanguage} · .yml</small></span><Download size={16} /></button>
-            <button className="copy-all" onClick={copyAll}><Clipboard size={15} />{ui.copyTwoFiles}</button>
+            <div className="copy-file-actions"><button className="copy-all" onClick={() => copyFile("focus")}><Clipboard size={15} />{ui.copyFocus}</button><button className="copy-all" onClick={() => copyFile("localisation")}><Clipboard size={15} />{ui.copyLocalisation}</button></div>
+            <button className="copy-all" onClick={backupProject} title={ui.backupHelp}><Save size={15} />{ui.backupProject}</button>
             <button className="copy-all" onClick={() => setPasteImportOpen(true)}><Upload size={15} />{ui.pasteFiles}</button>
             <p className="import-note"><AlertTriangle size={12} />{ui.importNote}</p>
           </section>

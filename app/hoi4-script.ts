@@ -31,7 +31,7 @@ function quotedValueEnd(text: string, quoteIndex: number) {
   for (let cursor = quoteIndex + 1; cursor < text.length; cursor += 1) {
     if (text[cursor] === '"' && !isEscaped(text, cursor)) return cursor + 1;
   }
-  return text.length;
+  throw new Error("Unclosed quoted string / 字符串缺少结束引号");
 }
 
 function bracedValueEnd(text: string, openIndex: number) {
@@ -58,15 +58,27 @@ function bracedValueEnd(text: string, openIndex: number) {
     }
   }
 
-  return text.length;
+  throw new Error("Unclosed script block / 脚本缺少右花括号");
 }
 
-function topLevelAssignments(text: string) {
+export function topLevelAssignments(text: string) {
   const assignments: AssignmentSpan[] = [];
   let cursor = 0;
+  const skipTrivia = (start: number) => {
+    let index = start;
+    while (index < text.length) {
+      if (/\s/.test(text[index])) index += 1;
+      else if (text[index] === "#") {
+        const newline = text.indexOf("\n", index);
+        index = newline < 0 ? text.length : newline + 1;
+      } else break;
+    }
+    return index;
+  };
 
   while (cursor < text.length) {
     const character = text[cursor];
+    if (character === "}") throw new Error("Unexpected closing brace / 多余的右花括号");
     if (character === "#") {
       const newline = text.indexOf("\n", cursor + 1);
       cursor = newline < 0 ? text.length : newline + 1;
@@ -84,12 +96,10 @@ function topLevelAssignments(text: string) {
     const start = cursor;
     while (cursor < text.length && isIdentifierCharacter(text[cursor])) cursor += 1;
     const key = text.slice(start, cursor);
-    let equalsIndex = cursor;
-    while (equalsIndex < text.length && /\s/.test(text[equalsIndex])) equalsIndex += 1;
+    const equalsIndex = skipTrivia(cursor);
     if (text[equalsIndex] !== "=") continue;
 
-    let valueIndex = equalsIndex + 1;
-    while (valueIndex < text.length && /\s/.test(text[valueIndex])) valueIndex += 1;
+    const valueIndex = skipTrivia(equalsIndex + 1);
     let end = valueIndex;
     if (text[valueIndex] === "{") {
       end = bracedValueEnd(text, valueIndex);
@@ -133,6 +143,84 @@ export function topLevelScalar(text: string, key: string) {
   if (!assignment) return "";
   const value = text.slice(assignment.valueStart, assignment.valueEnd);
   return value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+}
+
+export function topLevelScalars(text: string, key: string) {
+  return topLevelAssignments(text).filter((item) => item.key === key && !item.isBlock).map((item) => {
+    const value = text.slice(item.valueStart, item.valueEnd);
+    return value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+  });
+}
+
+/** Resolve literal numbers and local @variables; never substitute a guessed value. */
+export function resolveScriptNumber(token: string, sources: string[], fallback: number) {
+  if (!token) return fallback;
+  const variables = new Map<string, string>();
+  sources.forEach((source) => topLevelAssignments(source).forEach((item) => {
+    if (item.key.startsWith("@") && !item.isBlock) variables.set(item.key, source.slice(item.valueStart, item.valueEnd));
+  }));
+  const seen = new Set<string>();
+  let value = token;
+  while (value.startsWith("@")) {
+    if (seen.has(value) || !variables.has(value)) throw new Error(`Cannot resolve / 无法解析变量 ${token}`);
+    seen.add(value);
+    value = variables.get(value)!;
+  }
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) throw new Error(`Unsupported numeric value / 不支持的数值 ${token}`);
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`Invalid numeric value / 无效数值 ${token}`);
+  return number;
+}
+
+/** Replace edited focuses in their original slots; retain all other trees and fields. */
+export function renderImportedTree(source: string, treeId: string, focuses: { sourceId?: string; script: string }[]) {
+  const tree = topLevelAssignments(source).find((item) => item.key === "focus_tree" && item.isBlock);
+  if (!tree) throw new Error("Missing focus_tree");
+  const body = source.slice(tree.valueStart + 1, tree.valueEnd - 1);
+  const bySourceId = new Map(focuses.filter((focus) => focus.sourceId).map((focus) => [focus.sourceId, focus]));
+  const used = new Set<string>();
+  let output = "";
+  let cursor = 0;
+  let hasId = false;
+  for (const item of topLevelAssignments(body)) {
+    if (item.key === "id" && !item.isBlock) {
+      output += body.slice(cursor, item.valueStart) + treeId;
+      cursor = item.valueEnd;
+      hasId = true;
+    } else if (item.key === "focus" && item.isBlock) {
+      const sourceId = topLevelScalar(body.slice(item.valueStart + 1, item.valueEnd - 1), "id");
+      const replacement = bySourceId.get(sourceId);
+      output += body.slice(cursor, item.start) + (replacement?.script.trimStart() ?? "");
+      cursor = item.end;
+      used.add(sourceId);
+    }
+  }
+  output += body.slice(cursor);
+  if (!hasId) output = `\n\tid = ${treeId}\n${output}`;
+  const added = focuses.filter((focus) => !focus.sourceId || !used.has(focus.sourceId));
+  if (added.length) output += `\n${added.map((focus) => focus.script).join("\n\n")}\n`;
+  return source.slice(0, tree.valueStart + 1) + output + source.slice(tree.valueEnd - 1);
+}
+
+const FOCUS_REFERENCE_KEYS = new Set(["focus", "has_completed_focus", "complete_national_focus", "uncomplete_national_focus", "relative_position_id"]);
+
+/** Update exact recognized references, never comments, prose, or arbitrary identifiers. */
+export function renameFocusReferences(source: string, previousId: string, nextId: string): string {
+  let output = "";
+  let cursor = 0;
+  for (const item of topLevelAssignments(source)) {
+    if (item.isBlock) {
+      output += source.slice(cursor, item.valueStart + 1) + renameFocusReferences(source.slice(item.valueStart + 1, item.valueEnd - 1), previousId, nextId);
+      cursor = item.valueEnd - 1;
+    } else if (FOCUS_REFERENCE_KEYS.has(item.key)) {
+      const value = source.slice(item.valueStart, item.valueEnd);
+      if (value === previousId || value === `"${previousId}"`) {
+        output += source.slice(cursor, item.valueStart) + (value.startsWith('"') ? `"${nextId}"` : nextId);
+        cursor = item.valueEnd;
+      }
+    }
+  }
+  return output + source.slice(cursor);
 }
 
 /**
@@ -187,8 +275,8 @@ completion_reward = {
 
 type RenderFocusScriptOptions = {
   id: string;
-  x: number;
-  y: number;
+  x: number | string;
+  y: number | string;
   relativePositionId?: string;
   cost: string;
   relationLines: string[];

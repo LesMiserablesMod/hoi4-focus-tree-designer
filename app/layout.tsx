@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 const basePath = "/hoi4-focus-tree-designer";
-const siteUrl = "https://hoi4-focus-tree-designer.snug-loon-2361.chatgpt.site";
+const siteUrl = "https://lesmiserablesmod.github.io";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

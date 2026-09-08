@@ -40,7 +40,7 @@ localisation/<language>/<focus_tree>_l_<language>.yml
 
 ## Import behavior
 
-The importer edits focus IDs, coordinates, duration, prerequisites, mutually exclusive links, and localisation. Other fields inside each imported `focus = { ... }` block—including icons, conditions, AI weights, comments, and completion effects—remain attached to that node and are written back on export. File-level content outside the imported focus tree is not part of the visual project, so keeping a source backup is still recommended.
+The importer edits focus IDs, coordinates, duration, prerequisites, mutually exclusive links, and localisation. Other fields inside each imported `focus = { ... }` block—including icons, conditions, AI weights, comments, and completion effects—remain attached to that node and are written back on export. The first tree is edited in place; country rules, tree-level settings, other trees, variables and unrelated source content are retained. Imports with duplicate IDs, missing focus references or unresolved numeric expressions are rejected before replacing the canvas. Imported relations stay unchanged until the user edits them.
 
 ## Run locally
 
@@ -78,7 +78,7 @@ HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁
 - 浏览器本地自动保存、撤销、重做与代码预览
 - 中文和英文界面，以及多语言本地化导出
 
-导入后，编辑器只重建国策 ID、坐标、天数、前置与互斥等可视化字段；每个 `focus = { ... }` 内的图标、条件、AI 权重、注释和完成效果等其他内容会随节点保留，并在导出时写回。文件中位于所导入国策树之外的内容不属于可视化项目，因此仍建议保留原文件备份。
+导入后，编辑器只重建国策 ID、坐标、天数、前置与互斥等可视化字段；每个 `focus = { ... }` 内的图标、条件、AI 权重、注释和完成效果等其他内容会随节点保留，并在导出时写回。导入时编辑第一棵国策树，并保留国家条件、树级配置、其他树、变量与文件其余内容。重复 ID、未补齐的国策引用和无法解析的数值会在替换画布前报错；导入关系保持原样，编辑关系时才重新计算 OR 汇合。
 
 本项目是社区制作的 Mod 工具，与 Paradox Interactive 无隶属或官方认可关系。
 
@@ -101,3 +101,14 @@ HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁
 Move and delete shortcuts apply only while the canvas or a node has keyboard focus. Text fields keep native text editing and undo. A batch operation creates one undo step. Row/column arrangement keeps spatial order with a spacing of 2 units, using the last clicked node's row or column; other nodes stay in place. Selection duration includes mutually exclusive nodes and is not a playable route duration.
 
 移动和删除快捷键仅在画布或节点获得键盘焦点时生效，输入框保留原生文字编辑和撤销。每次批量操作只产生一条撤销记录。排成一行 / 一列时，保持空间顺序，使用最后点击节点所在的行 / 列，间隔 2 格；其他节点保持原位。所选天数包含互斥国策，不代表可游玩路线的完成时间。单节点属性内可展开查看保留的原始效果与条件脚本。
+
+## Source preservation and draft safety
+
+- Imported `cost` and numeric variables retain their original tokens until their values are edited. The editor supports literal numbers and numeric `@variables`, including zero/fractional costs.
+- Same-language YML files can be imported together; extra localisation entries, such as custom tooltips, are retained. Import one TXT or one project JSON at a time. Multi-language batches are rejected explicitly.
+- Copy TXT and Copy YML produce separate, validated file contents. Downloaded YML still includes UTF-8 BOM.
+- Download a `.hoi4-project.json` backup to preserve the entire editable project, including source text; import it using the normal Import button.
+- Names and descriptions autosave while typing; a field editing session takes one undo step. IDs commit on blur/Enter, and invalid or duplicate renames are rejected. Recognized references in the current file are updated; references in other mod files still require a coordinated rename.
+- Canvas cards show absolute coordinates matching the grid; the inspector also displays relative export coordinates. The initial view fits the tree.
+
+导入仍有明确范围：当前不会展开其他文件中的共享国策。若节点依赖未包含的国策，导入会明确报错，不会删除依赖后继续导出。工程备份只包含当前本地化语言；切换本地化语言调整输出格式，不会自动翻译。
