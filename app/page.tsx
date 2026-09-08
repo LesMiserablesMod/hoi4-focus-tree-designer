@@ -25,6 +25,9 @@ import {
   Plus,
   Redo2,
   Save,
+  Search,
+  AlignHorizontalJustifyCenter,
+  AlignVerticalJustifyCenter,
   Settings2,
   Sun,
   Trash2,
@@ -68,6 +71,8 @@ import {
   topLevelBlockBodies,
   topLevelScalar,
 } from "./hoi4-script";
+
+import { arrangeSelection, findFocuses, removeSelection, setSelectionDays } from "./editor-actions";
 
 type FocusNode = {
   uid: string;
@@ -137,6 +142,32 @@ function detectLocalisationLanguage(text: string): LocalisationLanguage | null {
 
 const UI_MESSAGES = {
   "zh-CN": {
+    searchFocus: "查找国策",
+    searchPlaceholder: "名称或 ID · Ctrl+F",
+    searchResults: (count: number) => `${count} 个匹配 · Enter 定位首项`,
+    noSearchResults: "没有匹配的国策，试试名称或 ID。",
+    clearSearch: "清空搜索",
+    batchProperties: "批量编辑",
+    selectionSummary: (count: number, days: number) => `已选 ${count} 个国策 · 合计 ${days} 天`,
+    selectionHelp: "Ctrl / Cmd + 拖动框选；Shift + 点击增减选择。",
+    applyDays: "应用天数",
+    batchDaysPlaceholder: "输入统一天数",
+    arrangeRow: "排成一行",
+    arrangeColumn: "排成一列",
+    arrangeHelp: "保持空间顺序，间隔 2 格；使用最后点击节点所在的行或列。",
+    focusSelection: "定位所选",
+    clearSelection: "取消选择",
+    deleteSelection: (count: number) => `删除所选 ${count} 个国策`,
+    nodesRemoved: (count: number) => `已删除 ${count} 个国策，可用 Ctrl / Cmd + Z 撤销。`,
+    batchUpdated: (count: number) => `已更新 ${count} 个国策，可一步撤销。`,
+    selectionDaysHelp: "天数为所选节点之和，包含互斥国策。",
+    issuesTitle: "检查问题",
+    locateIssue: "定位相关国策",
+    issueHelp: "点击问题可定位；错误会阻止导出，提醒供检查。",
+    absoluteX: "绝对 X",
+    absoluteY: "绝对 Y",
+    preservedScript: "保留的原始脚本",
+    preservedScriptHelp: "以下效果、条件等内容会随国策保留并导出。",
     pageTitle: "HOI4 国策树设计器",
     appTitle: "国策树设计器",
     organizationGithub: "访问 Les Misérables Mod 组织 GitHub 首页",
@@ -292,6 +323,32 @@ const UI_MESSAGES = {
     coordinateOverlap: (ids: string[]) => `${ids.join("、")}：坐标重叠`,
   },
   en: {
+    searchFocus: "Find a focus",
+    searchPlaceholder: "Name or ID · Ctrl+F",
+    searchResults: (count: number) => `${count} matches · Enter locates the first`,
+    noSearchResults: "No matching focuses. Try a name or ID.",
+    clearSearch: "Clear search",
+    batchProperties: "Batch edit",
+    selectionSummary: (count: number, days: number) => `${count} selected · ${days} days total`,
+    selectionHelp: "Ctrl / Cmd + drag to select; Shift + click to add or remove.",
+    applyDays: "Apply days",
+    batchDaysPlaceholder: "Set completion days",
+    arrangeRow: "Arrange in a row",
+    arrangeColumn: "Arrange in a column",
+    arrangeHelp: "Keeps spatial order, spaced by 2 units on the last clicked node’s row or column.",
+    focusSelection: "Locate selection",
+    clearSelection: "Clear selection",
+    deleteSelection: (count: number) => `Delete ${count} selected focuses`,
+    nodesRemoved: (count: number) => `Deleted ${count} focuses. Undo with Ctrl / Cmd + Z.`,
+    batchUpdated: (count: number) => `Updated ${count} focuses. Undo in one step.`,
+    selectionDaysHelp: "Sum for the selected nodes, including mutually exclusive focuses.",
+    issuesTitle: "Issues",
+    locateIssue: "Locate related focuses",
+    issueHelp: "Click an issue to locate it. Errors block export; warnings need review.",
+    absoluteX: "Absolute X",
+    absoluteY: "Absolute Y",
+    preservedScript: "Preserved script",
+    preservedScriptHelp: "These effects and conditions stay attached and will be exported.",
     pageTitle: "HOI4 Focus Tree Designer",
     appTitle: "Focus Tree Designer",
     organizationGithub: "Visit the Les Misérables Mod organization on GitHub",
@@ -806,23 +863,26 @@ function parseFocusScript(
   } satisfies ProjectState;
 }
 
+type ValidationIssue = { tone: "error" | "warning"; message: string; uids: string[]; field?: "treeId" | "countryTag" };
+
 function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
   const ui = UI_MESSAGES[uiLanguage];
-  const errors: string[] = [];
-  const warnings: string[] = [];
+  const issues: ValidationIssue[] = [];
+  const error = (message: string, uids: string[] = [], field?: "treeId" | "countryTag") => issues.push({ tone: "error", message, uids, field });
+  const warning = (message: string, uids: string[]) => issues.push({ tone: "warning", message, uids });
   const ids = new Map<string, number>();
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.treeId.trim())) errors.push(ui.invalidTreeId);
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.countryTag.trim())) errors.push(ui.invalidCountryTag);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.treeId.trim())) error(ui.invalidTreeId, [], "treeId");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(project.countryTag.trim())) error(ui.invalidCountryTag, [], "countryTag");
   project.nodes.forEach((node) => {
     const id = node.id.trim();
     ids.set(id, (ids.get(id) ?? 0) + 1);
-    if (!id) errors.push(ui.missingFocusId);
-    else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) errors.push(ui.invalidFocusId(id));
-    if (!node.name.trim()) warnings.push(ui.missingFocusName(id || ui.unnamedFocus));
-    if (!Number.isInteger(node.days) || node.days < 1) errors.push(ui.invalidDays(id || ui.unnamedFocus));
+    if (!id) error(ui.missingFocusId, [node.uid]);
+    else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) error(ui.invalidFocusId(id), [node.uid]);
+    if (!node.name.trim()) warning(ui.missingFocusName(id || ui.unnamedFocus), [node.uid]);
+    if (!Number.isInteger(node.days) || node.days < 1) error(ui.invalidDays(id || ui.unnamedFocus), [node.uid]);
   });
   ids.forEach((count, id) => {
-    if (id && count > 1) errors.push(ui.duplicateId(id));
+    if (id && count > 1) error(ui.duplicateId(id), project.nodes.filter((node) => node.id.trim() === id).map((node) => node.uid));
   });
 
   const nodeByUid = new Map(project.nodes.map((node) => [node.uid, node]));
@@ -830,11 +890,11 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
   const forcedByUid = buildForcedCompletionMap(mutualNodeByUid);
   project.nodes.forEach((node) => {
     node.prerequisiteGroups.forEach((group, index) => {
-      if (!group.length) warnings.push(ui.emptyPrerequisiteGroup(node.id, index + 1));
-      if (group.includes(node.uid)) errors.push(ui.selfPrerequisite(node.id));
-      if (group.some((uid) => !nodeByUid.has(uid))) errors.push(ui.invalidPrerequisiteReference(node.id));
+      if (!group.length) warning(ui.emptyPrerequisiteGroup(node.id, index + 1), [node.uid]);
+      if (group.includes(node.uid)) error(ui.selfPrerequisite(node.id), [node.uid]);
+      if (group.some((uid) => !nodeByUid.has(uid))) error(ui.invalidPrerequisiteReference(node.id), [node.uid]);
       if (group.length && group.every((uid) => node.mutuallyExclusiveUids.includes(uid))) {
-        errors.push(ui.allPrerequisitesMutual(node.id));
+        error(ui.allPrerequisitesMutual(node.id), [node.uid]);
       }
     });
     for (let firstIndex = 0; firstIndex < node.prerequisiteGroups.length; firstIndex += 1) {
@@ -845,15 +905,15 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
           mutualNodeByUid,
           forcedByUid,
         )) {
-          errors.push(ui.mutuallyExclusivePrerequisiteGroups(node.id));
+          error(ui.mutuallyExclusivePrerequisiteGroups(node.id), [node.uid]);
         }
       }
     }
     node.mutuallyExclusiveUids.forEach((uid) => {
-      if (uid === node.uid) errors.push(ui.selfMutual(node.id));
+      if (uid === node.uid) error(ui.selfMutual(node.id), [node.uid]);
       const other = nodeByUid.get(uid);
-      if (!other) errors.push(ui.invalidMutualReference(node.id));
-      else if (!other.mutuallyExclusiveUids.includes(node.uid)) warnings.push(ui.unsyncedMutual(node.id));
+      if (!other) error(ui.invalidMutualReference(node.id), [node.uid]);
+      else if (!other.mutuallyExclusiveUids.includes(node.uid)) warning(ui.unsyncedMutual(node.id), [node.uid]);
     });
   });
 
@@ -870,7 +930,7 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
       }
     });
   }
-  if (reachable.size !== project.nodes.length) errors.push(ui.prerequisiteDeadlock);
+  if (reachable.size !== project.nodes.length) error(ui.prerequisiteDeadlock, project.nodes.filter((node) => !reachable.has(node.uid)).map((node) => node.uid));
 
   const visitRelative = (uid: string, path: Set<string>): boolean => {
     if (path.has(uid)) return true;
@@ -878,17 +938,23 @@ function validationFor(project: ProjectState, uiLanguage: UiLanguage) {
     if (!node?.relativeToUid) return false;
     return visitRelative(node.relativeToUid, new Set(path).add(uid));
   };
-  if (project.nodes.some((node) => visitRelative(node.uid, new Set()))) errors.push(ui.relativeReferenceCycle);
+  const relativeCycles = project.nodes.filter((node) => visitRelative(node.uid, new Set())).map((node) => node.uid);
+  if (relativeCycles.length) error(ui.relativeReferenceCycle, relativeCycles);
 
   const occupied = new Map<string, string[]>();
   project.nodes.forEach((node) => {
     const key = `${node.absX},${node.absY}`;
-    occupied.set(key, [...(occupied.get(key) ?? []), node.id]);
+    occupied.set(key, [...(occupied.get(key) ?? []), node.uid]);
   });
   occupied.forEach((nodeIds) => {
-    if (nodeIds.length > 1) warnings.push(ui.coordinateOverlap(nodeIds));
+    if (nodeIds.length > 1) warning(ui.coordinateOverlap(nodeIds.map((uid) => nodeByUid.get(uid)!.id)), nodeIds);
   });
-  return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
+  const unique = [...new Map(issues.map((issue) => [JSON.stringify([issue.tone, issue.message, issue.uids]), issue])).values()];
+  return {
+    errors: unique.filter((issue) => issue.tone === "error").map((issue) => issue.message),
+    warnings: unique.filter((issue) => issue.tone === "warning").map((issue) => issue.message),
+    issues: unique.sort((a, b) => Number(a.tone === "warning") - Number(b.tone === "warning")),
+  };
 }
 
 function downloadText(filename: string, content: string, withBom = false) {
@@ -1010,7 +1076,7 @@ function PrerequisiteEditor({ nodes, currentUid, groups, ui, onChange }: Prerequ
                 }}
               >
                 <option value="">＋ {group.length ? ui.addOrAlternative : ui.choosePrerequisite}</option>
-                {candidates.filter((node) => !group.includes(node.uid)).map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
+                {candidates.filter((node) => !group.includes(node.uid)).map((node) => <option key={node.uid} value={node.uid}>{node.name ? `${node.name} · ${node.id}` : node.id}</option>)}
               </select>
             </div>
           </div>
@@ -1053,13 +1119,33 @@ function MutualEditor({ nodes, currentUid, values, ui, onChange }: MutualEditorP
             }}
           >
             <option value="">＋ {ui.joinMutualGroup}</option>
-            {candidates.map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
+            {candidates.map((node) => <option key={node.uid} value={node.uid}>{node.name ? `${node.name} · ${node.id}` : node.id}</option>)}
           </select>
         </div>
         {!values.length && <span className="inline-empty">{ui.noMutual}</span>}
       </div>
     </section>
   );
+}
+
+function CoordinateInput({ label, value, onCommit }: { label: string; value: number; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  return <label>{label}<input type="text" inputMode="numeric" value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={(event) => {
+    const text = event.currentTarget.value.trim();
+    const next = Number(text);
+    if (/^-?\d+$/.test(text) && Number.isSafeInteger(next)) {
+      if (next !== value) onCommit(next);
+      setDraft(String(next));
+    } else setDraft(String(value));
+  }} onKeyDown={(event) => {
+    if (event.key === "Enter") event.currentTarget.blur();
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      event.currentTarget.value = String(value);
+      setDraft(String(value));
+      event.currentTarget.blur();
+    }
+  }} /></label>;
 }
 
 export default function Home() {
@@ -1080,6 +1166,13 @@ export default function Home() {
   const [pasteImportOpen, setPasteImportOpen] = useState(false);
   const [focusImportDraft, setFocusImportDraft] = useState("");
   const [localisationImportDraft, setLocalisationImportDraft] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [batchDays, setBatchDays] = useState("");
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const treeIdRef = useRef<HTMLInputElement>(null);
+  const countryTagRef = useRef<HTMLInputElement>(null);
+  const canvasColumnRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const projectRef = useRef(project);
   const dragRef = useRef<{
@@ -1111,6 +1204,9 @@ export default function Home() {
   const ui = UI_MESSAGES[uiLanguage];
   const selected = project.nodes.find((node) => node.uid === selectedUid) ?? null;
   const selectedUidSet = useMemo(() => new Set(selectedUids), [selectedUids]);
+  const selectedNodes = useMemo(() => project.nodes.filter((node) => selectedUidSet.has(node.uid)), [project.nodes, selectedUidSet]);
+  const searchResults = useMemo(() => findFocuses(project.nodes, searchQuery), [project.nodes, searchQuery]);
+  const selectionDays = selectedNodes.reduce((sum, node) => sum + node.days, 0);
   const activeLocalisationLabel = localisationLabel(project.localisationLanguage, uiLanguage);
   const safeTreeId = safeToken(project.treeId, "focus_tree");
   const focusFilename = `${safeTreeId}.txt`;
@@ -1427,29 +1523,33 @@ export default function Home() {
     setSelectedUids([copy.uid]);
   }
 
-  function removeNode(uid: string) {
-    if (project.nodes.length <= 1) {
+  function removeNodes(uids: string[]) {
+    const current = projectRef.current;
+    const nodes = removeSelection(current.nodes, uids);
+    if (nodes === current.nodes) {
       setToast({ tone: "warning", message: ui.keepOneFocus });
       return;
     }
-    const nextNodes = project.nodes
-      .filter((node) => node.uid !== uid)
-      .map((node) => ({
-        ...node,
-        prerequisiteGroups: node.prerequisiteGroups
-          .map((group) => group.filter((item) => item !== uid))
-          .filter((group) => group.length),
-        prerequisiteGroupsBeforeMutualMerge: node.prerequisiteGroupsBeforeMutualMerge
-          ?.map((group) => group.filter((item) => item !== uid))
-          .filter((group) => group.length),
-        mutuallyExclusiveUids: node.mutuallyExclusiveUids.filter((item) => item !== uid),
-        relativeToUid: node.relativeToUid === uid ? null : node.relativeToUid,
-      }));
-    commit({ ...project, nodes: nextNodes });
-    const nextSelectedUid = nextNodes[0]?.uid ?? "";
-    setSelectedUid(nextSelectedUid);
-    setSelectedUids(nextSelectedUid ? [nextSelectedUid] : []);
-    setToast({ tone: "success", message: ui.nodeRemoved });
+    commit({ ...current, nodes });
+    setSelectedUid(nodes[0]?.uid ?? "");
+    setSelectedUids(nodes[0] ? [nodes[0].uid] : []);
+    setToast({ tone: "success", message: ui.nodesRemoved(current.nodes.length - nodes.length) });
+  }
+
+  function updateSelection(action: "days" | "row" | "column") {
+    const current = projectRef.current;
+    const nodes = action === "days"
+      ? setSelectionDays(current.nodes, selectedUids, Number(batchDays))
+      : arrangeSelection(current.nodes, selectedUids, selectedUid, action);
+    if (nodes.every((node, index) => node === current.nodes[index])) return;
+    commit({ ...current, nodes });
+    setToast({ tone: "success", message: ui.batchUpdated(selectedNodes.length) });
+  }
+
+  function toggleSelection(uid: string) {
+    const next = selectedUidSet.has(uid) ? selectedUids.filter((item) => item !== uid) : [...selectedUids, uid];
+    setSelectedUids(next);
+    setSelectedUid(next.includes(uid) ? uid : next[next.length - 1] ?? "");
   }
 
   function moveNodesBy(uids: string[], deltaX: number, deltaY: number) {
@@ -1466,6 +1566,12 @@ export default function Home() {
   function handleNodePointerDown(event: ReactPointerEvent<HTMLButtonElement>, node: FocusNode) {
     if (event.button !== 0 || event.ctrlKey || event.metaKey || mode !== "edit") return;
     event.stopPropagation();
+    event.currentTarget.focus({ preventScroll: true });
+    if (event.shiftKey) {
+      event.preventDefault();
+      toggleSelection(node.uid);
+      return;
+    }
     const movingUids = selectedUidSet.has(node.uid) ? selectedUids : [node.uid];
     setSelectedUid(node.uid);
     if (!selectedUidSet.has(node.uid)) setSelectedUids([node.uid]);
@@ -1516,6 +1622,9 @@ export default function Home() {
 
   function handleCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (mode !== "edit") return;
+    if ((event.button === 0 || event.button === 1) && !(event.target as HTMLElement).closest("button")) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
     const shouldStartMarquee = event.button === 0 && (event.ctrlKey || event.metaKey);
     if (shouldStartMarquee) {
       event.preventDefault();
@@ -1640,7 +1749,7 @@ export default function Home() {
     const mouseX = event.clientX - rect.left;
     const mouseY = event.clientY - rect.top;
     setView((current) => {
-      const nextZoom = clamp(current.zoom * Math.exp(-event.deltaY * 0.0011), 0.42, 1.55);
+      const nextZoom = clamp(current.zoom * Math.exp(-event.deltaY * 0.0011), 0.08, 1.55);
       const pointX = (mouseX - current.x) / current.zoom;
       const pointY = (mouseY - current.y) / current.zoom;
       return {
@@ -1657,7 +1766,7 @@ export default function Home() {
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     setView((current) => {
-      const nextZoom = clamp(current.zoom * factor, 0.42, 1.55);
+      const nextZoom = clamp(current.zoom * factor, 0.08, 1.55);
       const pointX = (centerX - current.x) / current.zoom;
       const pointY = (centerY - current.y) / current.zoom;
       return {
@@ -1668,20 +1777,44 @@ export default function Home() {
     });
   }
 
-  function fitView() {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    const nodes = projectRef.current.nodes;
+  function fitNodes(nodes: FocusNode[]) {
+    setMode("edit");
+    const rect = canvasColumnRef.current?.getBoundingClientRect();
     if (!rect || !nodes.length) return;
     const left = Math.min(...nodes.map((node) => worldX(node.absX)));
     const right = Math.max(...nodes.map((node) => worldX(node.absX) + NODE_W));
     const top = Math.min(...nodes.map((node) => worldY(node.absY)));
     const bottom = Math.max(...nodes.map((node) => worldY(node.absY) + NODE_H));
-    const zoom = clamp(Math.min((rect.width - 100) / (right - left), (rect.height - 100) / (bottom - top)), 0.42, 1.1);
+    const zoom = clamp(Math.min((rect.width - 80) / (right - left), (rect.height - 100) / (bottom - top)), 0.08, 1.1);
     setView({
       zoom,
       x: (rect.width - (right - left) * zoom) / 2 - left * zoom,
       y: (rect.height - (bottom - top) * zoom) / 2 - top * zoom,
     });
+  }
+
+  function fitView() {
+    fitNodes(projectRef.current.nodes);
+  }
+
+  function locateNodes(uids: string[]) {
+    const nodes = projectRef.current.nodes.filter((node) => uids.includes(node.uid));
+    if (!nodes.length) return;
+    setSelectedUids(nodes.map((node) => node.uid));
+    setSelectedUid(nodes[0].uid);
+    fitNodes(nodes);
+    if (window.matchMedia("(max-width: 700px)").matches) {
+      requestAnimationFrame(() => canvasColumnRef.current?.scrollIntoView({ block: "start" }));
+    }
+  }
+
+  function locateIssue(issue: ValidationIssue) {
+    if (issue.uids.length) locateNodes(issue.uids);
+    else {
+      const input = issue.field === "treeId" ? treeIdRef.current : countryTagRef.current;
+      input?.scrollIntoView({ block: "nearest" });
+      input?.focus();
+    }
   }
 
   function applyImportedProject(
@@ -1772,6 +1905,7 @@ export default function Home() {
 
   function guardExport(action: () => void) {
     if (validation.errors.length) {
+      setIssuesOpen(true);
       setToast({ tone: "error", message: ui.resolveErrorsBeforeExport(validation.errors.length) });
       return;
     }
@@ -1814,8 +1948,37 @@ export default function Home() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      const editing = target.matches("input, textarea, select, [contenteditable='true']");
+      const editing = Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+      const canvasKeyboard = mode === "edit" && (target === canvasRef.current || Boolean(target.closest(".focus-card")));
       const modifier = event.ctrlKey || event.metaKey;
+      if (pasteImportOpen) {
+        if (event.key === "Escape") setPasteImportOpen(false);
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        saveNow();
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (editing) return;
+      if (modifier && event.key.toLowerCase() === "a" && mode === "edit") {
+        event.preventDefault();
+        setSelectedUids(project.nodes.map((node) => node.uid));
+        setSelectedUid(selectedUid || project.nodes[0]?.uid || "");
+        canvasRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (event.key === "Escape" && !marqueeRef.current) {
+        setSelectedUids([]);
+        setSelectedUid("");
+        return;
+      }
       if (!editing && event.key === "Escape" && marqueeRef.current) {
         event.preventDefault();
         const activeMarquee = marqueeRef.current;
@@ -1831,7 +1994,7 @@ export default function Home() {
       } else if (modifier && event.key.toLowerCase() === "y") {
         event.preventDefault();
         redo();
-      } else if (!editing && selectedUid && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      } else if (canvasKeyboard && selectedUid && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
         event.preventDefault();
         const step = event.shiftKey ? 2 : 1;
         const directions: Record<string, [number, number]> = {
@@ -1842,9 +2005,9 @@ export default function Home() {
         };
         const [deltaX, deltaY] = directions[event.key];
         moveNodesBy(selectedUidSet.has(selectedUid) ? selectedUids : [selectedUid], deltaX, deltaY);
-      } else if (!editing && (event.key === "Delete" || event.key === "Backspace") && selectedUid) {
+      } else if (canvasKeyboard && (event.key === "Delete" || event.key === "Backspace") && selectedUid) {
         event.preventDefault();
-        removeNode(selectedUid);
+        removeNodes(selectedUids);
       }
     };
     const handleWindowBlur = () => {
@@ -1943,11 +2106,28 @@ export default function Home() {
       <section className="workspace">
         <aside className="inspector panel-paper" aria-label={ui.focusProperties}>
           <div className="panel-heading">
-            <div><span className="eyebrow">FOCUS</span><h2>{ui.focusProperties}</h2></div>
+            <div><span className="eyebrow">FOCUS</span><h2>{selectedNodes.length > 1 ? ui.batchProperties : ui.focusProperties}</h2></div>
             <span className="folio">№ {String(project.nodes.findIndex((node) => node.uid === selectedUid) + 1).padStart(3, "0")}</span>
           </div>
 
-          {selected ? (
+          {selectedNodes.length > 1 ? (
+            <div className="inspector-form batch-panel">
+              <strong className="selection-summary" title={ui.selectionDaysHelp}>{ui.selectionSummary(selectedNodes.length, selectionDays)}</strong>
+              <p className="workflow-help">{ui.selectionHelp}</p>
+              <label>{ui.completionDays}
+                <input type="number" min="1" step="1" placeholder={ui.batchDaysPlaceholder} value={batchDays} onChange={(event) => setBatchDays(event.target.value)} />
+              </label>
+              <button className="workflow-button" disabled={!Number.isSafeInteger(Number(batchDays)) || Number(batchDays) < 1} onClick={() => updateSelection("days")}><Check size={15} />{ui.applyDays}</button>
+              <div className="ornament-rule"><span /></div>
+              <button className="workflow-button" onClick={() => updateSelection("row")}><AlignVerticalJustifyCenter size={16} />{ui.arrangeRow}</button>
+              <button className="workflow-button" onClick={() => updateSelection("column")}><AlignHorizontalJustifyCenter size={16} />{ui.arrangeColumn}</button>
+              <p className="workflow-help">{ui.arrangeHelp}</p>
+              <button className="workflow-button" onClick={() => fitNodes(selectedNodes)}><LocateFixed size={16} />{ui.focusSelection}</button>
+              <button className="workflow-button" onClick={() => { setSelectedUids([]); setSelectedUid(""); }}><X size={16} />{ui.clearSelection}</button>
+              <button className="workflow-button danger" disabled={selectedNodes.length === project.nodes.length} title={selectedNodes.length === project.nodes.length ? ui.keepOneFocus : undefined} onClick={() => removeNodes(selectedUids)}><Trash2 size={16} />{ui.deleteSelection(selectedNodes.length)}</button>
+              <div className="selection-members">{selectedNodes.map((node) => <button key={node.uid} onClick={() => locateNodes([node.uid])} title={node.id}>{node.name || node.id}<small>{node.id}</small></button>)}</div>
+            </div>
+          ) : selected ? (
             <div className="inspector-form">
               <label>{ui.focusId}<input value={selected.id} spellCheck={false} onChange={(event) => patchNode(selected.uid, { id: event.target.value })} /></label>
               <label>{ui.localisationName} · {activeLocalisationLabel}<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value })} /></label>
@@ -1981,19 +2161,32 @@ export default function Home() {
               <label>{ui.relativeTo}
                 <select value={selected.relativeToUid ?? ""} onChange={(event) => patchNode(selected.uid, { relativeToUid: event.target.value || null })}>
                   <option value="">{ui.canvasOrigin}</option>
-                  {project.nodes.filter((node) => node.uid !== selected.uid).map((node) => <option key={node.uid} value={node.uid}>{node.name || node.id}</option>)}
+                  {project.nodes.filter((node) => node.uid !== selected.uid).map((node) => <option key={node.uid} value={node.uid}>{node.name ? `${node.name} · ${node.id}` : node.id}</option>)}
                 </select>
               </label>
 
+              <div className="coordinate-inputs">
+                {(["absX", "absY"] as const).map((axis) => <CoordinateInput
+                  key={`${selected.uid}-${axis}-${selected[axis]}`}
+                  label={axis === "absX" ? ui.absoluteX : ui.absoluteY}
+                  value={selected[axis]}
+                  onCommit={(value) => patchNode(selected.uid, { [axis]: value })}
+                />)}
+              </div>
               <div className="coordinate-card">
                 <div><span>{ui.relativeX}</span><strong>{relativeX}</strong></div>
                 <div><span>{ui.relativeY}</span><strong>{relativeY}</strong></div>
                 <small><MousePointer2 size={13} />{ui.dragToEditCoordinates}</small>
               </div>
 
+              {selected.scriptExtras?.trim() && <details className="script-details">
+                <summary>{ui.preservedScript}</summary>
+                <p className="workflow-help">{ui.preservedScriptHelp}</p>
+                <pre>{selected.scriptExtras}</pre>
+              </details>}
               <div className="node-actions">
                 <button onClick={() => duplicateNode(selected.uid)}><Copy size={15} />{ui.duplicate}</button>
-                <button className="danger" onClick={() => removeNode(selected.uid)}><Trash2 size={15} />{ui.delete}</button>
+                <button className="danger" onClick={() => removeNodes([selected.uid])}><Trash2 size={15} />{ui.delete}</button>
               </div>
             </div>
           ) : (
@@ -2006,11 +2199,12 @@ export default function Home() {
           )}
         </aside>
 
-        <section className="canvas-column">
+        <section className="canvas-column" ref={canvasColumnRef}>
           {mode === "edit" ? (
             <div
               className={`focus-canvas ${marqueeBox ? "is-marquee" : ""} ${panning ? "is-panning" : ""}`}
               ref={canvasRef}
+              tabIndex={0}
               style={{
                 "--grid-x": `${GRID_X}px`,
                 "--grid-y": `${GRID_Y}px`,
@@ -2075,6 +2269,11 @@ export default function Home() {
                       onPointerUp={handleNodePointerUp}
                       onPointerCancel={handleNodePointerUp}
                       onLostPointerCapture={handleNodePointerUp}
+                      onClick={(event) => {
+                        if (event.detail !== 0) return;
+                        if (event.shiftKey) toggleSelection(node.uid);
+                        else { setSelectedUid(node.uid); setSelectedUids([node.uid]); }
+                      }}
                       aria-pressed={selectedUidSet.has(node.uid)}
                       aria-label={ui.focusCoordinate(node.name || node.id, rx, ry)}
                     >
@@ -2116,6 +2315,22 @@ export default function Home() {
         </section>
 
         <aside className="utility-rail" aria-label={ui.navigationAndExport}>
+          <section className="utility-card panel-paper search-card" aria-label={ui.searchFocus}>
+            <label className="search-label" htmlFor="focus-search"><Search size={16} />{ui.searchFocus}</label>
+            <div className="search-input-wrap">
+              <input id="focus-search" ref={searchRef} type="search" value={searchQuery} placeholder={ui.searchPlaceholder} autoComplete="off" onChange={(event) => setSearchQuery(event.target.value)} onKeyDown={(event) => {
+                if (event.key === "Enter" && searchResults.length) { event.preventDefault(); locateNodes([searchResults[0].uid]); }
+                if (event.key === "Escape") { event.stopPropagation(); setSearchQuery(""); event.currentTarget.blur(); }
+              }} />
+              {searchQuery && <button onClick={() => { setSearchQuery(""); searchRef.current?.focus(); }} aria-label={ui.clearSearch}><X size={14} /></button>}
+            </div>
+            {searchQuery.trim() && <>
+              <p className="workflow-help" role="status">{searchResults.length ? ui.searchResults(searchResults.length) : ui.noSearchResults}</p>
+              <div className="search-results">{searchResults.map((node) => <button key={node.uid} onClick={() => locateNodes([node.uid])} aria-pressed={selectedUid === node.uid}>
+                <strong>{node.name || ui.unnamedFocus}</strong><small>{node.id} · {ui.days(node.days)}</small>
+              </button>)}</div>
+            </>}
+          </section>
           <section className="utility-card panel-paper minimap-card">
             <div className="utility-heading">
               <div>
@@ -2149,8 +2364,8 @@ export default function Home() {
 
           <section className="utility-card panel-paper project-card">
             <div className="utility-heading"><div><span className="eyebrow">PROJECT</span><h2>{ui.projectSettings}</h2></div><Settings2 size={18} /></div>
-            <label>{ui.treeId}<input value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value })} /></label>
-            <label>{ui.countryTag}<input value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() })} /></label>
+            <label>{ui.treeId}<input ref={treeIdRef} value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value })} /></label>
+            <label>{ui.countryTag}<input ref={countryTagRef} value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() })} /></label>
             <label>{ui.localisationLanguage}
               <select
                 value={project.localisationLanguage}
@@ -2171,9 +2386,18 @@ export default function Home() {
             <p className="import-note"><AlertTriangle size={12} />{ui.importNote}</p>
           </section>
 
-          <section className={`validation-card ${validation.errors.length ? "has-errors" : validation.warnings.length ? "has-warnings" : ""}`}>
-            {validation.errors.length || validation.warnings.length ? <AlertTriangle size={19} /> : <CheckCircle2 size={19} />}
-            <div><strong>{validation.errors.length ? ui.errorCount(validation.errors.length) : validation.warnings.length ? ui.warningCount(validation.warnings.length) : ui.readyToExport}</strong><span>{validation.errors[0] ?? validation.warnings[0] ?? ui.projectSummary(project.nodes.length, prerequisiteEdges.length, mutualPairs.length)}</span></div>
+          <section className="utility-card panel-paper issues-panel" aria-label={ui.issuesTitle}>
+            <button className={`validation-card ${validation.errors.length ? "has-errors" : validation.warnings.length ? "has-warnings" : ""}`} aria-expanded={issuesOpen} aria-controls="issue-list" onClick={() => setIssuesOpen(!issuesOpen)}>
+              {validation.issues.length ? <AlertTriangle size={19} /> : <CheckCircle2 size={19} />}
+              <span className="validation-summary"><strong>{validation.issues.length ? `${ui.errorCount(validation.errors.length)} · ${ui.warningCount(validation.warnings.length)}` : ui.readyToExport}</strong><span>{ui.issuesTitle} {issuesOpen ? "−" : "+"}</span></span>
+            </button>
+            {issuesOpen && <div id="issue-list" className="issue-list">
+              <p className="workflow-help">{validation.issues.length ? ui.issueHelp : ui.projectSummary(project.nodes.length, prerequisiteEdges.length, mutualPairs.length)}</p>
+              {validation.issues.map((issue, index) => <button key={`${issue.tone}-${index}`} className={`issue-item ${issue.tone}`} onClick={() => locateIssue(issue)} title={issue.uids.length ? ui.locateIssue : ui.projectSettings}>
+                <span className="issue-severity">{issue.tone === "error" ? ui.errorCount(1) : ui.warningCount(1)}</span>
+                <span>{issue.message}</span><LocateFixed size={14} />
+              </button>)}
+            </div>}
           </section>
         </aside>
       </section>

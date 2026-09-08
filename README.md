@@ -9,7 +9,10 @@ The editor runs entirely in the browser. Your draft stays on your device unless 
 ## Features
 
 - Drag-and-drop focus tree canvas with zoom, pan, keyboard nudging, and grid snapping
-- Absolute and relative focus coordinates
+- Find focuses by name or ID and jump directly to the matching node
+- Multi-select batch duration, row/column arrangement, safe deletion, and selection day totals
+- Expandable validation issues with direct links to the affected nodes or project settings
+- Editable absolute coordinates alongside relative focus coordinates
 - HOI4-style prerequisites: AND between groups, OR within a group
 - Complete mutually exclusive groups with bidirectional relationship handling
 - Live validation for IDs, coordinates, broken references, cycles, and deadlocks
@@ -65,7 +68,10 @@ HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁
 主要功能包括：
 
 - 拖拽、缩放、平移与网格吸附
-- 国策 ID、名称、描述、天数与坐标编辑
+- 按名称 / ID 搜索并定位国策
+- 多选批量修改天数、排成一行 / 一列、删除及所选天数统计；批量操作可一步撤销
+- 展开全部校验问题，点击定位相关国策或项目设置
+- 国策 ID、名称、描述、天数与绝对坐标编辑，以及相对坐标显示
 - 前置条件、互斥关系与循环/死锁检查
 - TXT 国策脚本与 YML 本地化文件导入导出
 - TXT 往返编辑时保留每个国策内的图标、条件、AI 权重、注释与完成效果等非编辑字段
@@ -75,3 +81,23 @@ HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁
 导入后，编辑器只重建国策 ID、坐标、天数、前置与互斥等可视化字段；每个 `focus = { ... }` 内的图标、条件、AI 权重、注释和完成效果等其他内容会随节点保留，并在导出时写回。文件中位于所导入国策树之外的内容不属于可视化项目，因此仍建议保留原文件备份。
 
 本项目是社区制作的 Mod 工具，与 Paradox Interactive 无隶属或官方认可关系。
+
+## Editing shortcuts / 编辑快捷键
+
+| Action / 操作 | Shortcut / 快捷键 |
+| --- | --- |
+| Pan the canvas / 平移画布 | Left-drag blank canvas / 空白处左键拖动 |
+| Box selection / 框选 | Ctrl / Cmd + left-drag / 左键拖动 |
+| Add or remove one node / 增减单个选择 | Shift + click / 点击 |
+| Select all / 全选 | Ctrl / Cmd + A |
+| Find a focus / 查找国策 | Ctrl / Cmd + F; Enter locates the first result / Enter 定位首项 |
+| Move selection / 移动所选节点 | Arrow keys / 方向键; Shift moves 2 units / Shift 移动 2 格 |
+| Delete selection / 删除所选节点 | Delete / Backspace |
+| Undo / 撤销 | Ctrl / Cmd + Z |
+| Redo / 重做 | Ctrl / Cmd + Shift + Z, or Ctrl / Cmd + Y |
+| Save draft / 保存草稿 | Ctrl / Cmd + S |
+| Clear selection / 取消选择 | Escape |
+
+Move and delete shortcuts apply only while the canvas or a node has keyboard focus. Text fields keep native text editing and undo. A batch operation creates one undo step. Row/column arrangement keeps spatial order with a spacing of 2 units, using the last clicked node's row or column; other nodes stay in place. Selection duration includes mutually exclusive nodes and is not a playable route duration.
+
+移动和删除快捷键仅在画布或节点获得键盘焦点时生效，输入框保留原生文字编辑和撤销。每次批量操作只产生一条撤销记录。排成一行 / 一列时，保持空间顺序，使用最后点击节点所在的行 / 列，间隔 2 格；其他节点保持原位。所选天数包含互斥国策，不代表可游玩路线的完成时间。单节点属性内可展开查看保留的原始效果与条件脚本。
