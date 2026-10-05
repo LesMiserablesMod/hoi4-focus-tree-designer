@@ -20,6 +20,7 @@ The editor runs entirely in the browser. Your draft stays on your device unless 
 - Preserve unmanaged per-focus script fields such as icons, availability, bypasses, AI weights, and completion effects during TXT round trips
 - Export focus scripts and UTF-8 BOM localisation files
 - Local browser autosave, undo, redo, duplicate, and code preview
+- Create and switch independent TAG projects with separate trees, localisation and drafts; existing single-tree drafts migrate automatically
 - Chinese and English interfaces
 - Localisation export for English, French, German, Polish, Brazilian Portuguese, Russian, Spanish, Japanese, Simplified Chinese, and Korean
 
@@ -76,6 +77,7 @@ HOI4 国策树设计器是一款纯前端、可在浏览器中使用的《钢铁
 - TXT 国策脚本与 YML 本地化文件导入导出
 - TXT 往返编辑时保留每个国策内的图标、条件、AI 权重、注释与完成效果等非编辑字段
 - 浏览器本地自动保存、撤销、重做与代码预览
+- 新增 TAG 空白项目并随时切换，各自保留国策树、本地化和草稿；旧单树草稿自动迁移，同次会话保留各项目的撤销记录与画布视角
 - 中文和英文界面，以及多语言本地化导出
 
 导入后，编辑器只重建国策 ID、坐标、天数、前置与互斥等可视化字段；每个 `focus = { ... }` 内的图标、条件、AI 权重、注释和完成效果等其他内容会随节点保留，并在导出时写回。导入时编辑第一棵国策树，并保留国家条件、树级配置、其他树、变量与文件其余内容。重复 ID、未补齐的国策引用和无法解析的数值会在替换画布前报错；导入关系保持原样，编辑关系时才重新计算 OR 汇合。
@@ -103,6 +105,10 @@ Move and delete shortcuts apply only while the canvas or a node has keyboard foc
 移动和删除快捷键仅在画布或节点获得键盘焦点时生效，输入框保留原生文字编辑和撤销。每次批量操作只产生一条撤销记录。排成一行 / 一列时，保持空间顺序，使用最后点击节点所在的行 / 列，间隔 2 格；其他节点保持原位。所选天数包含互斥国策，不代表可游玩路线的完成时间。单节点属性内可展开查看保留的原始效果与条件脚本。
 
 ## Source preservation and draft safety
+
+Use **Project settings → New TAG** to create an empty tree, then switch projects using the TAG list. TAGs use three uppercase letters or digits starting with a letter (for example `FRA`, `YUN`, `D01`). Creating a project keeps the current tree. Autosave stores all projects and the active TAG together; import, export and `.hoi4-project.json` backup operate on the selected project. A per-project backup does not include the other TAG projects. Switching clears search and batch controls; undo and viewport state stay separate for each project during the session.
+
+在 **项目设置 → 新增 TAG** 中创建空白国策树，再用 TAG 列表切换。TAG 为以字母开头的 3 位大写字母或数字，例如 `FRA`、`YUN`、`D01`。新增项目会保留当前国策树；所有项目及当前 TAG 一起自动保存。导入、TXT/YML 导出与工程备份针对当前项目，单项目备份不包含其他 TAG。各项目的撤销记录与视角在本次会话中独立保留，切换会清空搜索和批量编辑控件。
 
 - Imported `cost` and numeric variables retain their original tokens until their values are edited. The editor supports literal numbers and numeric `@variables`, including zero/fractional costs.
 - Same-language YML files can be imported together; extra localisation entries, such as custom tooltips, are retained. Import one TXT or one project JSON at a time. Multi-language batches are rejected explicitly.

@@ -75,6 +75,7 @@ import {
 import { readFocusTree, uniqueFocusId, reservedFocusIds, decodeLocalisation, type SourceValues } from "./focus-file";
 
 import { arrangeSelection, findFocuses, removeSelection, setSelectionDays } from "./editor-actions";
+import { normalizeWorkspace, singleProjectWorkspace, snapshotWorkspace, validateNewTag, WORKSPACE_STORAGE_KEY, type ProjectWorkspace } from "./project-workspace";
 
 type FocusNode = {
   uid: string;
@@ -146,6 +147,23 @@ function detectLocalisationLanguage(text: string): LocalisationLanguage | null {
 
 const UI_MESSAGES = {
   "zh-CN": {
+    tagProjects: "TAG 项目",
+    switchTagProject: "切换 TAG 项目",
+    addTag: "新增 TAG",
+    newTagTitle: "新增 TAG 项目",
+    newTagHelp: "创建独立的空白国策树。现有项目会保留，可随时切换回来；导入和导出仅针对当前项目。",
+    tagProjectsHelp: "每个 TAG 独立保存；导入和导出使用当前选中的项目。",
+    newTagPlaceholder: "例如 FRA、GER、YUN",
+    createTagProject: "创建并切换",
+    closeNewTag: "关闭新增 TAG",
+    invalidNewTag: "TAG 必须为 3 位大写字母或数字，且以字母开头，例如 FRA、D01。",
+    duplicateTagProject: "这个 TAG 已有项目，请从上方列表切换。",
+    duplicateTreeProject: "该国策树 ID 已被其他项目使用，请换一个。",
+    tagProjectCreated: (tag: string) => `已创建 ${tag} 的空白国策树。`,
+    tagProjectSwitched: (tag: string) => `已切换到 ${tag}；原项目已保留。`,
+    projectChangedDuringImport: "读取文件时已切换项目，此次导入已取消。请在目标 TAG 下重新导入。",
+    emptyTagTree: "这棵国策树还是空的",
+    emptyTagTreeHelp: "添加第一个国策，或导入这个 TAG 的 TXT / YML。",
     searchFocus: "查找国策",
     searchPlaceholder: "名称或 ID · Ctrl+F",
     searchResults: (count: number) => `${count} 个匹配 · Enter 定位首项`,
@@ -339,6 +357,23 @@ const UI_MESSAGES = {
     coordinateOverlap: (ids: string[]) => `${ids.join("、")}：坐标重叠`,
   },
   en: {
+    tagProjects: "TAG projects",
+    switchTagProject: "Switch TAG project",
+    addTag: "New TAG",
+    newTagTitle: "New TAG project",
+    newTagHelp: "Create a separate empty tree. Existing projects stay available to switch back to. Import and export apply to the current project.",
+    tagProjectsHelp: "Each TAG is saved separately. Import and export use the selected project.",
+    newTagPlaceholder: "e.g. FRA, GER, YUN",
+    createTagProject: "Create and switch",
+    closeNewTag: "Close new TAG",
+    invalidNewTag: "Use 3 uppercase letters or digits, starting with a letter, e.g. FRA or D01.",
+    duplicateTagProject: "This TAG already has a project. Select it from the list above.",
+    duplicateTreeProject: "Another project uses this tree ID. Choose a different ID.",
+    tagProjectCreated: (tag: string) => `Created an empty tree for ${tag}.`,
+    tagProjectSwitched: (tag: string) => `Switched to ${tag}. Your previous project is retained.`,
+    projectChangedDuringImport: "The project changed while reading files. Import cancelled; import again in the intended TAG project.",
+    emptyTagTree: "This focus tree is empty",
+    emptyTagTreeHelp: "Add the first focus, or import this TAG’s TXT / YML files.",
     searchFocus: "Find a focus",
     searchPlaceholder: "Name or ID · Ctrl+F",
     searchResults: (count: number) => `${count} matches · Enter locates the first`,
@@ -650,7 +685,7 @@ function normalizeProject(value: unknown): ProjectState | null {
     localisationLanguage?: unknown;
     nodes?: unknown;
   };
-  if (!Array.isArray(raw.nodes) || !raw.nodes.length) return null;
+  if (!Array.isArray(raw.nodes)) return null;
 
   const provisional = raw.nodes.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
@@ -685,7 +720,7 @@ function normalizeProject(value: unknown): ProjectState | null {
       sourceValues: node.sourceValues,
     } satisfies FocusNode];
   });
-  if (!provisional.length) return null;
+  if (raw.nodes.length && !provisional.length) return null;
 
   const validUids = new Set(provisional.map((node) => node.uid));
   const sanitizedNodes = provisional.map((node) => ({
@@ -1179,6 +1214,11 @@ export default function Home() {
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(DEFAULT_UI_LANGUAGE);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [project, setProject] = useState<ProjectState>(initialProject);
+  const [workspace, setWorkspace] = useState(() => singleProjectWorkspace(initialProject));
+  const [newTagOpen, setNewTagOpen] = useState(false);
+  const [newTag, setNewTag] = useState("");
+  const [newTreeId, setNewTreeId] = useState("");
+  const [newTagError, setNewTagError] = useState("");
   const [selectedUid, setSelectedUid] = useState(initialProject.nodes[1].uid);
   const [selectedUids, setSelectedUids] = useState<string[]>([initialProject.nodes[1].uid]);
   const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
@@ -1203,6 +1243,9 @@ export default function Home() {
   const canvasColumnRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const projectRef = useRef(project);
+  const workspaceRef = useRef(workspace);
+  const tagProjectButtonRef = useRef<HTMLButtonElement>(null);
+  const projectSessionsRef = useRef(new Map<string, { past: ProjectState[]; future: ProjectState[]; view: ViewState; selectedUids: string[]; selectedUid: string }>());
   const editSessionRef = useRef<string | null>(null);
   const pendingDraftRef = useRef(false);
   const dragRef = useRef<{
@@ -1232,6 +1275,7 @@ export default function Home() {
   } | null>(null);
 
   const ui = UI_MESSAGES[uiLanguage];
+  const tagProjects = snapshotWorkspace(workspace, project).projects;
   const selected = project.nodes.find((node) => node.uid === selectedUid) ?? null;
   const selectedUidSet = useMemo(() => new Set(selectedUids), [selectedUids]);
   const selectedNodes = useMemo(() => project.nodes.filter((node) => selectedUidSet.has(node.uid)), [project.nodes, selectedUidSet]);
@@ -1314,14 +1358,28 @@ export default function Home() {
         if (isUiLanguage(savedUiLanguage)) setUiLanguage(savedUiLanguage);
         const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
         if (isThemeMode(savedTheme)) setThemeMode(savedTheme);
-        const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
-        if (saved) {
-          const parsed = normalizeProject(JSON.parse(saved));
-          if (parsed) {
-            setProject(parsed);
-            setSelectedUid(parsed.nodes[0].uid);
-            setSelectedUids([parsed.nodes[0].uid]);
+        const savedWorkspace = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        let restored: ProjectWorkspace<ProjectState> | null = null;
+        if (savedWorkspace) {
+          restored = normalizeWorkspace(JSON.parse(savedWorkspace), normalizeProject);
+          if (!restored) throw new Error("Invalid workspace");
+        } else {
+          const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
+          if (saved) {
+            const parsed = normalizeProject(JSON.parse(saved));
+            if (!parsed) throw new Error("Invalid draft");
+            restored = singleProjectWorkspace(parsed);
           }
+        }
+        if (restored) {
+          const active = restored.projects.find((entry) => entry.id === restored.activeProjectId)!.project;
+          workspaceRef.current = restored;
+          setWorkspace(restored);
+          projectRef.current = active;
+          setProject(active);
+          const first = active.nodes[0]?.uid ?? "";
+          setSelectedUid(first);
+          setSelectedUids(first ? [first] : []);
         }
       } catch {
         setToast({ tone: "warning", message: UI_MESSAGES[DEFAULT_UI_LANGUAGE].damagedDraft });
@@ -1354,7 +1412,7 @@ export default function Home() {
     if (!ready) return;
     const timer = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+        persistWorkspace();
         if (!pendingDraftRef.current) setSaveState("saved");
       } catch {
         setSaveState("error");
@@ -1362,7 +1420,7 @@ export default function Home() {
       }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [project, ready, ui.autosaveUnavailable]);
+  }, [project, workspace, ready, ui.autosaveUnavailable]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1899,11 +1957,13 @@ export default function Home() {
   }
 
   async function handleImport(event: ChangeEvent<HTMLInputElement>) {
+    const importProjectId = workspaceRef.current.activeProjectId;
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     if (!files.length) return;
     try {
       const texts = await Promise.all(files.map(async (file) => ({ name: file.name, text: await file.text() })));
+      if (workspaceRef.current.activeProjectId !== importProjectId) throw new Error(ui.projectChangedDuringImport);
       const jsonFiles = texts.filter((item) => item.name.endsWith(".json"));
       if (jsonFiles.length) {
         if (texts.length !== 1) throw new Error(ui.importChoiceError);
@@ -1912,7 +1972,8 @@ export default function Home() {
         const restored = normalizeProject(backup.project);
         if (!restored || new Set(restored.nodes.map((node) => node.uid)).size !== restored.nodes.length) throw new Error(ui.unrecognizedFile);
         commit(restored);
-        setSelectedUid(restored.nodes[0].uid); setSelectedUids([restored.nodes[0].uid]);
+        const first = restored.nodes[0]?.uid ?? "";
+        setSelectedUid(first); setSelectedUids(first ? [first] : []);
         setMode("edit"); window.setTimeout(fitView, 60);
         setToast({ tone: "success", message: ui.projectImported });
         return;
@@ -2005,9 +2066,73 @@ export default function Home() {
     downloadText(`${safeTreeId}.hoi4-project.json`, JSON.stringify({ format: "hoi4-focus-project", version: 1, project: projectRef.current }, null, 2));
   }
 
+  function persistWorkspace() {
+    const snapshot = snapshotWorkspace(workspaceRef.current, projectRef.current);
+    workspaceRef.current = snapshot;
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+  }
+
+  function closeNewTag() {
+    setNewTagOpen(false);
+    tagProjectButtonRef.current?.focus({ preventScroll: true });
+  }
+
+  function activateTagProject(nextWorkspace: ProjectWorkspace<ProjectState>) {
+    (document.activeElement as HTMLElement | null)?.blur();
+    const current = snapshotWorkspace(workspaceRef.current, projectRef.current);
+    projectSessionsRef.current.set(current.activeProjectId, { past, future, view, selectedUids, selectedUid });
+    // Use the post-blur snapshot so an uncommitted ID stays in its original project.
+    const entries = nextWorkspace.projects.map((entry) => entry.id === current.activeProjectId ? current.projects.find((item) => item.id === entry.id)! : entry);
+    const next = { ...nextWorkspace, projects: entries };
+    const active = next.projects.find((entry) => entry.id === next.activeProjectId)!.project;
+    workspaceRef.current = next;
+    projectRef.current = active;
+    setWorkspace(next);
+    setProject(active);
+    const session = projectSessionsRef.current.get(next.activeProjectId);
+    const valid = new Set(active.nodes.map((node) => node.uid));
+    const selection = session?.selectedUids.filter((uid) => valid.has(uid)) ?? [];
+    const first = active.nodes[0]?.uid ?? "";
+    const primary = session && valid.has(session.selectedUid) ? session.selectedUid : selection[0] ?? first;
+    setSelectedUid(primary);
+    setSelectedUids(selection.length ? selection : primary ? [primary] : []);
+    setPast(session?.past ?? []);
+    setFuture(session?.future ?? []);
+    setView(session?.view ?? fittedView(active.nodes, canvasSize.width, canvasSize.height));
+    editSessionRef.current = null;
+    pendingDraftRef.current = false;
+    dragRef.current = null; panRef.current = null; marqueeRef.current = null;
+    setMarqueeBox(null); setPanning(false);
+    setSearchQuery(""); setBatchDays(""); setIssuesOpen(false); setMode("edit");
+    setFocusImportDraft(""); setLocalisationImportDraft("");
+    try { persistWorkspace(); setSaveState("saved"); }
+    catch { setSaveState("error"); setToast({ tone: "warning", message: ui.autosaveUnavailable }); return false; }
+    return true;
+  }
+
+  function switchTagProject(id: string) {
+    if (id === workspaceRef.current.activeProjectId || !workspaceRef.current.projects.some((entry) => entry.id === id)) return;
+    if (activateTagProject({ ...workspaceRef.current, activeProjectId: id })) setToast({ tone: "success", message: ui.tagProjectSwitched(projectRef.current.countryTag) });
+  }
+
+  function createTagProject() {
+    const tag = newTag.trim().toUpperCase(), treeId = newTreeId.trim();
+    const snapshot = snapshotWorkspace(workspaceRef.current, projectRef.current);
+    const invalid = validateNewTag(tag, treeId, snapshot.projects.map((entry) => entry.project));
+    if (invalid) {
+      setNewTagError(invalid === "tag" ? ui.invalidNewTag : invalid === "treeId" ? ui.invalidTreeId : invalid === "duplicateTag" ? ui.duplicateTagProject : ui.duplicateTreeProject);
+      return;
+    }
+    const id = crypto.randomUUID();
+    const empty: ProjectState = { treeId, countryTag: tag, localisationLanguage: projectRef.current.localisationLanguage, nodes: [] };
+    const saved = activateTagProject({ ...snapshot, activeProjectId: id, projects: [...snapshot.projects, { id, project: empty }] });
+    closeNewTag();
+    if (saved) setToast({ tone: "success", message: ui.tagProjectCreated(tag) });
+  }
+
   function saveNow() {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projectRef.current));
+      persistWorkspace();
       setSaveState("saved");
       setToast({ tone: "success", message: ui.draftSaved });
     } catch {
@@ -2022,8 +2147,8 @@ export default function Home() {
       const editing = Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
       const canvasKeyboard = mode === "edit" && (target === canvasRef.current || Boolean(target.closest(".focus-card")));
       const modifier = event.ctrlKey || event.metaKey;
-      if (pasteImportOpen) {
-        if (event.key === "Escape") setPasteImportOpen(false);
+      if (pasteImportOpen || newTagOpen) {
+        if (event.key === "Escape") { if (newTagOpen) closeNewTag(); else setPasteImportOpen(false); }
         return;
       }
       if (modifier && event.key.toLowerCase() === "s") {
@@ -2084,7 +2209,7 @@ export default function Home() {
     };
     const flushBeforeLeaving = () => {
       (document.activeElement as HTMLElement | null)?.blur();
-      try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projectRef.current)); } catch { /* Storage errors are already visible in the editor. */ }
+      try { persistWorkspace(); } catch { /* Storage errors are already visible in the editor. */ }
     };
     const handleWindowBlur = () => {
       const activeMarquee = marqueeRef.current;
@@ -2213,7 +2338,7 @@ export default function Home() {
             </div>
           ) : selected ? (
             <div className="inspector-form">
-              <DraftField key={`${selected.uid}-id-${selected.id}`} label={ui.focusId} value={selected.id} onCommit={(id) => patchNode(selected.uid, { id: id.trim() })} onPending={(pending) => { pendingDraftRef.current = pending; if (pending) setSaveState("saving"); else saveNow(); }} />
+              <DraftField key={`${workspace.activeProjectId}-${selected.uid}-id-${selected.id}`} label={ui.focusId} value={selected.id} onCommit={(id) => patchNode(selected.uid, { id: id.trim() })} onPending={(pending) => { pendingDraftRef.current = pending; if (pending) setSaveState("saving"); else saveNow(); }} />
               <p className="workflow-help">{ui.idReferenceHelp}</p>
               <label>{ui.localisationName} · {activeLocalisationLabel}<input value={selected.name} onChange={(event) => patchNode(selected.uid, { name: event.target.value }, `${selected.uid}:name`)} onBlur={() => { editSessionRef.current = null; }} /></label>
               <label>{ui.localisationDescription} · {activeLocalisationLabel}<textarea value={selected.description} rows={5} onChange={(event) => patchNode(selected.uid, { description: event.target.value }, `${selected.uid}:description`)} onBlur={() => { editSessionRef.current = null; }} /></label>
@@ -2278,8 +2403,8 @@ export default function Home() {
           ) : (
             <div className="empty-selection">
               <MousePointer2 size={28} />
-              <h3>{ui.chooseFocus}</h3>
-              <p>{ui.chooseFocusHelp}</p>
+              <h3>{project.nodes.length ? ui.chooseFocus : ui.emptyTagTree}</h3>
+              <p>{project.nodes.length ? ui.chooseFocusHelp : ui.emptyTagTreeHelp}</p>
               <button className="primary-button" onClick={addNode}><Plus size={16} />{ui.addFocus}</button>
             </div>
           )}
@@ -2451,6 +2576,13 @@ export default function Home() {
 
           <section className="utility-card panel-paper project-card">
             <div className="utility-heading"><div><span className="eyebrow">PROJECT</span><h2>{ui.projectSettings}</h2></div><Settings2 size={18} /></div>
+            <div className="tag-project-controls">
+              <label>{ui.switchTagProject}<select value={workspace.activeProjectId} disabled={!ready} onChange={(event) => switchTagProject(event.target.value)}>
+                {tagProjects.map((entry) => <option key={entry.id} value={entry.id}>{entry.project.countryTag} · {entry.project.treeId}</option>)}
+              </select></label>
+              <button ref={tagProjectButtonRef} className="workflow-button" disabled={!ready} onClick={() => { setNewTag(""); setNewTreeId(""); setNewTagError(""); setNewTagOpen(true); }}><Plus size={15} />{ui.addTag}</button>
+              <p className="workflow-help">{ui.tagProjectsHelp}</p>
+            </div>
             <label>{ui.treeId}<input ref={treeIdRef} value={project.treeId} onChange={(event) => patchProject({ treeId: event.target.value }, "treeId")} onBlur={() => { editSessionRef.current = null; }} /></label>
             <label>{ui.countryTag}<input ref={countryTagRef} disabled={Boolean(project.sourceText)} value={project.countryTag} maxLength={12} onChange={(event) => patchProject({ countryTag: event.target.value.toUpperCase() }, "countryTag")} /></label>
             {project.sourceText && <p className="workflow-help">{ui.sourceTreeHelp}</p>}
@@ -2505,6 +2637,30 @@ export default function Home() {
           {toast.tone === "success" ? <Check size={17} /> : <AlertTriangle size={17} />}
           <span>{toast.message}</span>
           <button onClick={() => setToast(null)} aria-label={ui.closeToast}><Minus size={14} /></button>
+        </div>
+      )}
+
+      {newTagOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewTag(); }}>
+          <form className="import-modal tag-modal panel-paper project-card" role="dialog" aria-modal="true" aria-labelledby="new-tag-title" aria-describedby="new-tag-help" onSubmit={(event) => { event.preventDefault(); createTagProject(); }} onKeyDown={(event) => {
+            if (event.key !== "Tab") return;
+            const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"));
+            const first = controls[0], last = controls[controls.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+          }}>
+            <div className="import-modal-head"><h2 id="new-tag-title">{ui.newTagTitle}</h2><button type="button" onClick={closeNewTag} aria-label={ui.closeNewTag}><X size={16} /></button></div>
+            <p id="new-tag-help" className="workflow-help">{ui.newTagHelp}</p>
+            <label>{ui.countryTag}<input autoFocus value={newTag} maxLength={3} placeholder={ui.newTagPlaceholder} aria-invalid={Boolean(newTagError)} aria-describedby={newTagError ? "new-tag-error" : undefined} onChange={(event) => {
+              const tag = event.target.value.toUpperCase();
+              setNewTag(tag);
+              if (!newTreeId || newTreeId === `${newTag}_national_focus`) setNewTreeId(`${tag}_national_focus`);
+              setNewTagError("");
+            }} /></label>
+            <label>{ui.treeId}<input value={newTreeId} onChange={(event) => { setNewTreeId(event.target.value); setNewTagError(""); }} /></label>
+            {newTagError && <p id="new-tag-error" className="tag-project-error" role="alert">{newTagError}</p>}
+            <div className="modal-actions"><button type="button" className="modal-cancel" onClick={closeNewTag}>{ui.cancel}</button><button type="submit" className="primary-button"><Plus size={15} />{ui.createTagProject}</button></div>
+          </form>
         </div>
       )}
 
